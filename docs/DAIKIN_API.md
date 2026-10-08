@@ -15,6 +15,19 @@ Accepted (2004) and verified by reading back, 2026-10-07:
 - power e_A002/p_01, fan-mode fan speed e_3001/p_28 (written with unchanged values)
 Rejected (4000): streamer e_3003/p_20 = 01 while in fan mode. Readable, but not writable this way.
 
+Full cycle from the Pico 2 W (MicroPython v1.29.0, blocking `requests`), 2026-10-08, AC off in fan mode at start:
+
+| Step | Write | Result |
+|---|---|---|
+| start | power `01` + mode `0200` (cool) in **one** request, unit off | 2004; read 5 s later: on, cool |
+| after 10 min | mode `0000` (fan), power unchanged | 2004; read 5 s later: on, fan |
+| after 15 min | power `00` | 2004; read 5 s later: off, mode stays fan |
+
+- Power and mode can be set together while the unit is off (spike S5, partly). A read 5 s after a write
+  already shows the new state. Target temp, fan speeds and streamer were not written and stayed unchanged.
+- Room readings (1-min reads): cool 10 min took 29 °C / 80 % to 27 °C / 70 %. Temperature is whole degrees
+  and moves slowly; humidity reacts faster and rose back to 75–80 % in fan mode and after off (coil drying).
+
 Paths below are relative to `/dsiot/edge/adr_0100.dgc_status/dgc_status/e_1002` (indoor)
 or `/dsiot/edge/adr_0200.dgc_status/dgc_status/e_1003` (outdoor).
 Multi-byte numbers are little-endian hex.
