@@ -1,0 +1,15 @@
+# Local secrets and machine-specific config (see secrets.example.py)
+secrets.py
+*.local.*
+local/
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store

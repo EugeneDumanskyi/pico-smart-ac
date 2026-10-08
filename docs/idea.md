@@ -1,0 +1,349 @@
+# Smart AC control: design
+
+Goal: a Pico 2 W watches the room and runs the Daikin AC in short,
+purposeful cycles instead of leaving it on all day. It should cool when it's hot, dry when
+it's humid, always dry out the coil afterwards, and stay out of the way when a human uses the remote.
+Profiles and their parameters are edited from a web page served by the Pico.
+
+API details: [DAIKIN_API.md](DAIKIN_API.md). Firmware structure: [architecture.md](architecture.md).
+Plan and the decision log: [roadmap.md](roadmap.md).
+
+The firmware is MicroPython ([ADR 0001](decisions/0001-language.md)). The config files and the HTTP API below are
+the contract; the same logic runs on the Mac against a simulator ([ADR 0002](decisions/0002-functional-core.md)).
+
+## How it is used
+
+- The AC is **off by default**. When the Pico is running, it owns the AC: it switches it on for a cycle and off again.
+- The owner switches the Pico on when at home (above all at night, when nobody can watch the AC) and may switch it
+  off when leaving. Switching the Pico off mid-cycle is a normal event: the AC then simply stays under remote control.
+- It must also run unattended for days or weeks without drifting into a bad state.
+- **No wall clock.** The Pico never needs the date or time of day ([ADR 0004](decisions/0004-time.md)). Profiles are chosen
+  by hand (for example `night` at bedtime); every duration is relative: "cool for up to 30 min, then fan 20 min, then
+  wait 30 min".
+
+## What we can rely on
+
+| Capability | Status |
+|---|---|
+| Read room temp (whole °C), humidity (%), outdoor temp (0.5 °C) | confirmed |
+| Power on/off, mode (cool/fan/dry/heat/auto), cool target temp | confirmed (written + read back) |
+| Fan speed | written with same value; real change not yet tested |
+| Dry mode `0500` | from pydaikin, not yet tested |
+| Streamer | readable, **not** writable (rsc 4000) |
+| Mold-proof | unmapped |
+| Room readings while the unit is off | not tested; may be stale (spike S1) |
+
+Facts that shape the design:
+- **Sensor is the AC's own**, near the ceiling, in whole degrees. "> 29" really means "≥ 30".
+  Right after the unit stops, readings can drift, so a cooldown wait is needed before judging again.
+- **The remote overwrites everything** when any button is pressed (one-way IR, full state).
+- **No auth on the API**: anything on the LAN can control the AC.
+- Room humidity has been 80–85 % in testing, so humidity matters at least as much as temperature.
+
+## Core concept: a profile is a list of rules; a rule is a trigger plus a sequence of phases
+
+```
+profile
+└── rules[]        checked in order, first match wins
+      ├── trigger      conditions on temp / humidity / outdoor temp
+      ├── phases[]     run in order; each has a mode and ends on time OR a goal, whichever comes first
+      │     ├── mode, target temp, fan speed
+      │     ├── max_min
+      │     └── until    optional goal, e.g. temp <= 26 or humidity <= 65
+      ├── end          power off (always)
+      └── cooldown     minutes to wait before triggers are checked again
+```
+
+While a cycle runs, triggers are not checked. The cycle just runs its phases.
+It still reads sensors each minute so `until` goals can end a phase early.
+
+Every rule that cools or dries ends with a **fan phase** to dry the coil.
+This is our own mold-proof, and it's easy to stop.
+
+## Profiles (defaults)
+
+### day
+| Rule | Trigger | Phases | Cooldown |
+|---|---|---|---|
+| too hot | temp > 29 | cool, target 26, **30 min or until temp ≤ 26**; then fan 20 min | 30 min |
+| humid | humidity > 75 | dry, **60 min or until humidity ≤ 65**; then fan 20 min | 45 min |
+
+First match wins, so a hot and humid room is cooled (cooling also dries).
+Dry mode removes moisture with less cooling and less power than cool mode.
+
+### night
+| Rule | Trigger | Phases | Cooldown |
+|---|---|---|---|
+| warm | temp > 27 | cool, target 26, quiet fan, 45 min or until temp ≤ 26; then fan quiet 15 min | 30 min |
+| humid | humidity > 75 | dry, quiet fan, 45 min or until humidity ≤ 65; then fan quiet 15 min | 45 min |
+
+### away
+Nobody home: only prevent mold and damp, don't cool.
+| Rule | Trigger | Phases | Min. interval |
+|---|---|---|---|
+| damp | humidity > 80 | dry 30 min; then fan 20 min | 4 h between starts |
+
+### off
+Automation does nothing, not even the manual-hold takeover below. Kill switch.
+
+## Choosing the active profile
+
+1. **From the web page** (dropdown). The choice is saved and survives a reboot.
+2. Later: **physical button** on the Pico (cycles profiles, LED blinks the profile number),
+   or **presence** (see Later ideas).
+
+## State machine
+
+```
+       trigger matches          last phase done / hard cap        end state confirmed
+ IDLE ─────────────────▶ RUNNING(phase n) ─────────────────▶ STOPPING ───────────────────▶ COOLDOWN ──(timer)──▶ IDLE
+
+ RUNNING, STOPPING ──(AC state ≠ what we set)────▶ MANUAL (hands off) ──(hold over, AC off)──▶ IDLE
+ IDLE, COOLDOWN ─────(AC on, not started by us)──▶ MANUAL ──(hold over, AC still on)──▶ TAKEOVER ──▶ STOPPING
+ any state ──────────(pause from web)────────────▶ PAUSED ──(timer or resume)──▶ IDLE
+```
+
+Ownership rules are in [ADR 0003](decisions/0003-ac-ownership.md): every write is decided from a read in the same tick
+(read before write), checked by a read-back ~5 s later, and automation never touches a state a human set
+until the manual hold is over.
+
+**STOPPING** writes off every tick until a read confirms it; only then does the cooldown start.
+
+**Manual override detection.** After each write, remember what we set (power, mode, target, fan).
+Each minute, compare it with what the AC reports. If it differs, a human used the remote or the app:
+- stop the cycle and don't touch anything,
+- stay hands-off for `manual_hold_min` (each new change by the human restarts the hold),
+- or until the human turns the AC off and it stays off for `manual_release_off_min`.
+
+If the AC is on and we didn't turn it on (for example, it was on when the Pico booted), also go MANUAL.
+
+**TAKEOVER.** If the hold is over and the AC is still on, the Pico ends the run the way a cycle ends:
+fan for `finish_fan_min` if the mode was cool or dry, then off. Not in the `off` profile and not while PAUSED.
+
+**PAUSED** is set from the web page (1 h, 2 h, 8 h, or until resumed). Pausing, or switching to the `off` profile,
+while a cycle runs asks what to do with the AC:
+- **finish**: fan phase, then off (the default button);
+- **leave running**: the Pico stops controlling and leaves the AC as it is (it becomes a human's run).
+
+## Safety
+
+- **Hard cap**: no cycle runs longer than `hard_cap_min` (default 120) in total, whatever the profile says.
+  When it's hit, off is written at once, skipping any fan phase.
+- **Always end the cycle.** `STOPPING` retries the off write every tick until a read confirms it.
+- **Relative time only**: every duration uses the monotonic clock, so nothing depends on the date, NTP or the internet.
+- **Pico crash or Wi-Fi loss mid-cycle**:
+  - hardware watchdog, fed only while the control loop is healthy;
+  - Wi-Fi supervisor: reconnect, reset after 15 min offline (details in [architecture.md](architecture.md#failure-handling));
+  - on boot, read the AC state. If the saved state says "we started it" **and** the AC still matches what we set,
+    finish the cycle at once (last fan phase, then off; a cool/dry phase is never resumed). Otherwise it's a human's
+    run: MANUAL, then TAKEOVER.
+- **Pico switched off by the owner mid-cycle**: no backstop on purpose; the AC is under remote control until the Pico
+  is back.
+- **Sanity checks**: ignore readings that are out of range, and don't start a cycle on a single reading;
+  require the trigger on `confirm_reads` consecutive reads, 1 minute apart.
+- **Config edits never break a running cycle**: a running cycle keeps the copy of the rule it started with;
+  new values apply from the next cycle.
+- **Shadow mode**: `dry_run: true` runs everything but turns writes into events ("would start dry out").
+  Used for tuning (roadmap M3) and after changing profiles.
+
+## Config files
+
+Two JSON files on the Pico's flash (each at most 16 KB). Both are written atomically (write `*.tmp`, then rename) and the
+previous version is kept as `*.bak`. Built-in defaults are compiled into the firmware, so a missing or
+broken file falls back to them (and the web page shows a warning).
+
+### `profiles.json`
+
+```json
+{
+  "version": 1,
+  "active": "night",
+  "profiles": {
+    "day": {
+      "label": "Day",
+      "rules": [
+        {"name": "too_hot",
+         "when": {"match": "all", "conditions": [{"sensor": "temp", "op": ">", "value": 29}]},
+         "confirm_reads": 2,
+         "phases": [
+           {"mode": "cool", "target_c": 26, "fan": "auto", "max_min": 30,
+            "until": {"sensor": "temp", "op": "<=", "value": 26}},
+           {"mode": "fan", "fan": "3", "max_min": 20, "until": null}
+         ],
+         "cooldown_min": 30, "min_interval_min": 0},
+        {"name": "humid",
+         "when": {"match": "all", "conditions": [{"sensor": "hum", "op": ">", "value": 75}]},
+         "confirm_reads": 2,
+         "phases": [
+           {"mode": "dry", "fan": "auto", "max_min": 60, "until": {"sensor": "hum", "op": "<=", "value": 65}},
+           {"mode": "fan", "fan": "3", "max_min": 20, "until": null}
+         ],
+         "cooldown_min": 45, "min_interval_min": 0}
+      ]
+    }
+  }
+}
+```
+
+- `active`: a profile name or `"off"`.
+- `sensor`: `temp`, `hum`, `outdoor_temp` (later: `dew_point`, external sensor values).
+- `op`: `>`, `>=`, `<`, `<=`. `match`: `all` (AND) or `any` (OR).
+- `mode`: `cool`, `dry`, `fan` (`heat`, `auto` allowed by the AC but not offered in the UI).
+- `fan`: `auto`, `quiet`, `1`..`5`. `target_c`: only for `cool`, in 0.5 °C steps.
+- `min_interval_min`: minimum time between cycle starts of this rule (e.g. 240 for away).
+
+### `settings.json`
+
+```json
+{
+  "version": 1,
+  "ac_ip": "192.0.2.10",
+  "poll_s": 60,
+  "hard_cap_min": 120,
+  "manual_hold_min": 120,
+  "manual_release_off_min": 30,
+  "finish_fan_min": 20,
+  "sensor_limits": {"temp": [10, 45], "hum": [5, 100]},
+  "dry_run": false
+}
+```
+
+- `ac_ip` defaults to `DAIKIN_IP` from `secrets.py`.
+- `finish_fan_min`: fan time used by TAKEOVER and by Stop when there is no rule fan phase to use.
+- The API token is `API_TOKEN` in `secrets.py`, not in this file, so there is no default token.
+
+### Validation (server side, rejects the whole save on any error)
+
+| Field | Allowed |
+|---|---|
+| `target_c` | 18–30, step 0.5 |
+| condition `value` | temp/outdoor_temp 10–45, hum 20–95 |
+| `max_min` | 1–120 per phase; sum of phases ≤ `hard_cap_min` |
+| `cooldown_min` | 0–480 |
+| `confirm_reads` | 1–10 |
+| `min_interval_min` | 0–1440 |
+| `manual_hold_min`, `finish_fan_min` | 10–480, 0–60 |
+| phases per rule | 1–5; rules per profile 1–8; profiles ≤ 10 |
+| names | `[a-z0-9_]{1,24}`, unique |
+| document size | ≤ 16 KB |
+| `until` | must refer to a sensor that moves the right way for the mode (warning only) |
+| last phase | warning if a rule with cool/dry does not end with a fan phase |
+
+Errors come back as a list with JSON paths, e.g.
+`{"ok": false, "errors": [{"path": "profiles.day.rules[0].phases[0].target_c", "msg": "must be 18–30"}]}`,
+so the page can highlight the exact field.
+
+## Web UI spec
+
+One page, served by the Pico, works on a phone. No external CDN (all assets stored on the Pico,
+gzipped; budget ≈ 60 KB total). The page polls `/api/state` every 5 s.
+The Pico sends ages and durations in seconds; the page turns them into clock times with the phone's own clock.
+
+### Tabs
+
+**Status** (home)
+- Big numbers: room temp, humidity, outdoor temp; AC power / mode / target / fan.
+- Automation state: `IDLE` / `RUNNING` (rule, phase *n* of *m*, minutes left, goal) / `STOPPING` /
+  `COOLDOWN` (minutes left) / `MANUAL` (hands off, minutes left) / `TAKEOVER` / `PAUSED` (minutes left).
+- Buttons:
+  - **Profile switcher** (dropdown: off, each profile).
+  - **Pause 1 h / 2 h / 8 h / until resumed**, **Resume**. While a cycle runs, pause and "off" ask:
+    *finish* or *leave running*.
+  - **Run now**: pick a rule and start it immediately, skipping the trigger.
+  - **Stop**: finish with a fan phase, then off. **Stop now**: off immediately.
+  - **Clear manual hold**.
+- Last error (e.g. "AC not reachable for 12 min").
+
+**Profiles** (editor)
+- List of profiles; each expands to its rules; each rule to its trigger and phases.
+- Form fields with steppers, sized for the validation ranges above. Phase list with add / remove / reorder.
+- Plain-language summary under each rule, generated from the values:
+  "When temp > 29 for 2 readings: cool to 26 for up to 30 min (stop early at ≤ 26), then fan 20 min, then off. Wait 30 min."
+- **Save** sends the whole document; **Revert** reloads it; **Restore defaults** (with confirm).
+- Duplicate a profile, rename, delete (not the active one); copy a rule from another profile.
+
+**History**
+- 24 h chart: temp and humidity lines, AC mode as a colored band underneath, cycle starts marked.
+- Event list: cycle start/end, phase changes, manual override detected, takeover, errors, config saved, reboots.
+
+**Settings**
+- Everything in `settings.json`; AC IP with a "test connection" button.
+- Device info: firmware version, uptime, free memory, Wi-Fi RSSI, IP, reconnect and reset counters.
+
+### HTTP API
+
+All bodies are JSON. Requests that change anything need the header `X-Token: <api_token>`
+(the page asks for it once and keeps it in `localStorage`). GETs are open on the LAN.
+No CORS headers are ever sent, so a custom header also blocks cross-site requests from other pages.
+Large responses (`/api/history`, the UI files) are streamed in chunks. Times are relative: `*_s` fields are seconds
+(left, or ago); nothing in the API is a wall-clock time.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /` | | the page |
+| `GET /api/state` | | current state (below) |
+| `GET /api/history` | `?minutes=1440` | `{"step_s": 60, "last_age_s": 12, "temp": [...], "hum": [...], "out": [...], "mode": [...], "power": [...]}`, oldest first, null for gaps |
+| `GET /api/events` | `?limit=100` | `[{"age_s": 120, "boot": 7, "kind": "cycle_start", "msg": "..."}]` newest first; `age_s` is null for earlier boots |
+| `GET /api/profiles` | | `profiles.json` |
+| `PUT /api/profiles` | whole document | `{"ok": true, "warnings": [...]}` or `{"ok": false, "errors": [...]}` |
+| `POST /api/profiles/validate` | whole document | same as PUT, but does not save |
+| `POST /api/profiles/reset` | | restores defaults |
+| `GET /api/settings` | | `settings.json` |
+| `PUT /api/settings` | whole document | as PUT profiles |
+| `POST /api/active` | `{"profile": "away", "cycle": "finish"}` (`cycle`: `finish` or `leave`, used only if a cycle runs) | new state |
+| `POST /api/action` | `{"action": "pause", "minutes": 120, "cycle": "finish"}` (`minutes: null` = until resumed), `{"action": "resume"}`, `{"action": "run", "profile": "...", "rule": 0}`, `{"action": "stop"}`, `{"action": "stop_now"}`, `{"action": "clear_manual"}` | new state |
+| `POST /api/ac/test` | | AC reachability and fw version |
+
+`/api/state` example:
+```json
+{
+  "state": "RUNNING",
+  "profile": "day",
+  "cycle": {"rule": "humid", "phase": 1, "phases": 2, "mode": "dry",
+            "phase_left_s": 2400, "goal": "hum <= 65", "running_s": 1800},
+  "cooldown_left_s": null, "manual_left_s": null, "paused_left_s": null,
+  "room": {"temp": 28, "hum": 81}, "outdoor_temp": 31.5,
+  "ac": {"reachable": true, "power": true, "mode": "dry", "target_c": null, "fan": "auto"},
+  "dry_run": false,
+  "last_error": null,
+  "config_warning": null,
+  "device": {"uptime_s": 86400, "boot": 7, "heap_free": 150000, "heap_max_block": 90000, "rssi": -60,
+             "wifi_reconnects": 0, "reset_cause": "watchdog"}
+}
+```
+
+### History storage
+- Ring buffer in RAM: 1440 one-minute samples × 5 values ≈ 10 KB. Lost on reboot (acceptable).
+- Events: last ~200 in RAM; only config saves, cycle summaries, overrides and reboots are also appended to a small
+  rotating file on flash with the boot number (a few writes per day, so flash wear doesn't matter).
+
+## Later ideas (not in v1)
+
+Scheduled releases for these are in [roadmap.md](roadmap.md#after-v10).
+
+- **IR receiver on the Pico** (VS1838B, ~$0.50): sees the remote's commands directly, so manual override is
+  detected instantly and we know exactly what the human set (the Daikin IR protocol is documented in
+  IRremoteESP8266). An **IR LED** could then send what the API rejects (streamer, mold-proof).
+- **Own sensor at seat height** (SHT40 / AHT20): 0.1 °C resolution, so real hysteresis (start 28.5, stop 26.5)
+  and **dew point / absolute humidity** triggers, which don't move just because the temperature changed.
+- **Presence**: ping/ARP the phone, or an LD2410 mmWave sensor (detects a person sitting or sleeping)
+  → switch to away automatically, skip cooling an empty room.
+- **Profile timer**: "night for 8 h, then off" (relative, no clock needed).
+- **Night sleep curve**: let the cool target rise slowly, e.g. +0.5 °C per hour.
+- **Energy**: decode the API's usage history, log kWh per cycle, compare profiles.
+- **Learn the room**: fit how fast the room warms up after the AC stops, predict when the trigger will be hit.
+- **Log replay** on the Mac: test a profile change against real history (the simulator itself is part of v1).
+- **MQTT / Home Assistant** via a broker on the LAN: phone control and notifications without TLS on the Pico.
+- **Physical button / small display** on the Pico.
+- Needing an opt-in wall clock (NTP), so only if someone asks: weather-forecast pre-cooling, time-of-use tariffs,
+  calendar-based profile switching.
+
+## Open questions
+
+- **Fan phase vs. humidity**: drying the coil with the fan blows the condensed water back into the room.
+  Log humidity during the fan phase; if it jumps, make the fan phase shorter or slower.
+- Thresholds: is 26 °C a comfortable "done" temperature? Is 27 right for night?
+- Does dry mode accept a target temperature on this unit? (spike S2)
+- Do room readings update while the unit is off, and how much do they jump at start/stop? (spike S1) If not,
+  the external sensor moves into v1.0.
+- Power use: the API has daily/weekly usage history (units not yet decoded).
