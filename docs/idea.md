@@ -94,14 +94,29 @@ Automation does nothing, not even the manual-hold takeover below. Kill switch.
 
 ## State machine
 
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE
+    state Automation {
+        IDLE --> RUNNING : trigger matches
+        RUNNING --> RUNNING : next phase
+        RUNNING --> STOPPING : last phase done / hard cap
+        STOPPING --> COOLDOWN : end state confirmed
+        COOLDOWN --> IDLE : timer
+        RUNNING --> MANUAL : AC state ≠ what we set
+        STOPPING --> MANUAL : AC state ≠ what we set
+        IDLE --> MANUAL : AC on, not started by us
+        COOLDOWN --> MANUAL : AC on, not started by us
+        MANUAL --> IDLE : hold over, AC off
+        MANUAL --> TAKEOVER : hold over, AC still on
+        TAKEOVER --> STOPPING
+    }
+    Automation --> PAUSED : pause (web)
+    PAUSED --> IDLE : timer / resume
 ```
-       trigger matches          last phase done / hard cap        end state confirmed
- IDLE ─────────────────▶ RUNNING(phase n) ─────────────────▶ STOPPING ───────────────────▶ COOLDOWN ──(timer)──▶ IDLE
 
- RUNNING, STOPPING ──(AC state ≠ what we set)────▶ MANUAL (hands off) ──(hold over, AC off)──▶ IDLE
- IDLE, COOLDOWN ─────(AC on, not started by us)──▶ MANUAL ──(hold over, AC still on)──▶ TAKEOVER ──▶ STOPPING
- any state ──────────(pause from web)────────────▶ PAUSED ──(timer or resume)──▶ IDLE
-```
+`RUNNING` steps through the rule's phases (phase *n* of *m*). `MANUAL` means hands off: automation doesn't touch the
+AC. `PAUSED` can be entered from any state; what happens to a running cycle is described below.
 
 Ownership rules are in [ADR 0003](decisions/0003-ac-ownership.md): every write is decided from a read in the same tick
 (read before write), checked by a read-back ~5 s later, and automation never touches a state a human set
