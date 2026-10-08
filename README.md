@@ -37,6 +37,17 @@ your Wi-Fi, the AC's IP address and an API token.
 
 To read the AC's status from a computer: `python3 tools/daikin_status.py <ac-ip>`.
 
+## Development
+
+Tests run on the MicroPython Unix port, built from the pinned release ([firmware.md](docs/firmware.md)).
+Needs `git`, `make`, a C compiler, Python 3 and `pipx`.
+
+```sh
+make micropython   # build the Unix port once, into ~/.cache/smartac/
+make lint          # ruff and the license header check
+make test          # tests/run.py on the Unix port
+```
+
 ## License
 
 [GPL-3.0-only](LICENSE). Vendored libraries keep their own licenses.

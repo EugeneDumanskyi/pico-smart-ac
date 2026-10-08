@@ -1,0 +1,14 @@
+# Lint only (no formatter). Ruff version pinned in the Makefile (RUFF_VERSION).
+line-length = 120
+extend-exclude = ["src/lib", "tests/lib"]
+builtins = ["const"]
+
+[lint]
+select = ["E", "F", "W", "I"]
+
+[lint.isort]
+known-first-party = ["smartac"]
+
+[lint.per-file-ignores]
+# MicroPython script: ruff sorts `secrets` (ours) as CPython's stdlib module.
+"tools/daikin_check.py" = ["I001"]

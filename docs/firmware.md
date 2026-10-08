@@ -32,9 +32,11 @@ Official releases only, copied into the repo unchanged, so a build never depends
 | Library | Version | Commit | Status |
 |---|---|---|---|
 | [Microdot](https://github.com/miguelgrinberg/microdot) | v2.7.0 | `7742db9ff9f49635de3387145fafe56bf2377a97` | planned, not vendored yet |
-| micropython-lib `unittest` (tests only) | from the micropython-lib commit above | `ee4bb8ff139e24c42b739935fbd8ec7c4d061e02` | planned, not vendored yet |
+| micropython-lib `unittest` (tests only) | 0.11.0, from the micropython-lib commit above | `ee4bb8ff139e24c42b739935fbd8ec7c4d061e02` | vendored in `tests/lib/unittest/` |
 
 Tests run on the MicroPython Unix port built from the same v1.29.0 tag, on the Mac and in CI.
+`tools/build_micropython.sh` (`make micropython`) clones the tag into `~/.cache/smartac/` (override with `MPY_DIR`),
+checks the tag commit above and builds `ports/unix` with `MICROPY_PY_FFI=0`, the same flags everywhere.
 
 ## Flashing
 
