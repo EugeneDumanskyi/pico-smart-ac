@@ -363,7 +363,7 @@ def validate_settings(settings, profiles=None):
     if "version" in settings and settings["version"] != VERSION:
         rep.error("version", "must be %d" % VERSION)
     ip = settings.get("ac_ip")
-    if ip is not None and not _is_ipv4(ip):
+    if ip is not None and not is_ipv4(ip):
         rep.error("ac_ip", "must be an IPv4 address, e.g. 192.0.2.10")
     for key, (lo, hi) in SETTINGS_INTS.items():
         if key in settings:
@@ -391,7 +391,8 @@ def validate_settings(settings, profiles=None):
     return rep.errors, rep.warnings
 
 
-def _is_ipv4(s):
+def is_ipv4(s):
+    # A dotted IPv4 literal. The AC is reached by address only: a name would need DNS, which blocks the loop.
     if not isinstance(s, str):
         return False
     parts = s.split(".")

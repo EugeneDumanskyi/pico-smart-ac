@@ -25,17 +25,19 @@ the plan is in [roadmap.md](roadmap.md). Decisions: [decisions/](decisions/).
 | `core/controller.py` | core | state machine: `step(now, reading, actions) → commands`; owns cycle, stopping, cooldown, manual hold, takeover, pause |
 | `core/history.py` | core | 1440 × 1-min ring buffer in preallocated `array`s; streamed JSON export |
 | `core/events.py` | core | event ring (200), marks which events go to flash and owns the `events.log` line format |
-| `shell/daikin.py` | shell | async HTTP POST to `/dsiot/multireq`, hard timeout, one request at a time |
-| `shell/store.py` | shell | atomic JSON files (`.tmp` → rename, `.bak`), state snapshot, event log, crash log |
+| `shell/daikin.py` | shell | async HTTP POST to `/dsiot/multireq`, hard timeout, one request at a time, IPv4 literal only (no DNS); never raises |
+| `shell/store.py` | shell | `MemoryStore` (documents kept as JSON text) for the host for now; later atomic JSON files (`.tmp` → rename, `.bak`), state snapshot, event log, crash log, same API |
 | `shell/net.py` | shell | Wi-Fi supervisor (power-save off, reconnect, counters) |
 | `shell/api.py` | shell | Microdot routes from idea.md, token check, body size limit, streamed responses |
-| `shell/app.py` | shell | wiring and the asyncio tasks below |
-| `board/base.py` | shell | `Board` interface: Wi-Fi, watchdog, LED, reset, reset cause |
-| `board/pico.py`, `board/host.py` | shell | real hardware / no-op + fake time for the Unix port |
+| `shell/app.py` | shell | boot from the store, the asyncio tasks below, the action queue; `_step` is the seam the runner watches |
+| `board/base.py` | shell | `Board` interface: ticks, `wait(event, ms)` (all sleeps go through it), Wi-Fi link, watchdog, LED, reset, reset cause |
+| `board/pico.py`, `board/host.py` | shell | real hardware / any clock plus a ticks offset, no-op hardware, and a sleep hook for virtual time on the Unix port |
 | `sim/clock.py` | sim | `FakeClock` (moves only when told, can start near the ticks wrap), `ScaledClock` (real time × speed); any callable returning ticks works as the clock |
 | `sim/room.py` | sim | room model: temperature, humidity and a wet coil per minute, sensors rounded like the AC's |
 | `sim/device.py` | sim | `FakeDaikin`: raw indoor/outdoor params, reads, validated writes, scripted remote presses, outages, rejected or ignored writes; no I/O |
 | `sim/server.py`, `sim/run.py` | sim | minimal HTTP/1.1 on 127.0.0.1 (one request per connection); standalone runner for manual pokes |
+| `sim/scenario.py` | sim | a long run generated from a seed: room, remote presses, outages, failing writes (device script); actions and power cuts (runner timeline) |
+| `sim/harness.py` | sim | the month run: the app against the simulator in virtual time, invariants checked after every step |
 | `www/` | assets | single-page UI (vanilla JS, no framework, no CDN), gzipped at build time |
 
 Logging: user-facing **events** (ring in RAM, cycle summaries and config saves appended to flash),
@@ -151,7 +153,8 @@ src/                     copied to the Pico root
   lib/microdot/          vendored, pinned (docs/firmware.md)
   www/                   built, gzipped UI assets
 web/                     UI sources (index.html, app.js, style.css)
-sim/                     fake Daikin + room model (MicroPython, Unix port): clock, room, device, server, run.py
+sim/                     fake Daikin + room model (MicroPython, Unix port): clock, room, device, server, run.py;
+                         scenario.py + harness.py (the month run)
 tests/run.py             test runner (Unix port)
 tests/lib/               vendored micropython-lib unittest
 tests/unit/              core tests, unittest style
@@ -171,7 +174,7 @@ docs/
 |---|---|---|---|
 | Unit | Unix port | codec, validation, rules, controller transitions, history | every commit (CI) |
 | Golden traces | Unix port | config + minute-by-minute readings (incl. remote changes, takeover, gaps, reboots, ticks wrap) → exact commands | every commit (CI) |
-| Simulator | Unix port: app + fake Daikin server in one process | whole app with an accelerated clock: cycles, overrides, unreachable AC, HTTP API | every commit (CI) |
+| Simulator | Unix port: app + fake Daikin server in one process | whole app in virtual time (the board's sleep hook is the scheduler, HTTP still over 127.0.0.1): a seeded month of cycles, remote presses, outages, failing writes, actions and power cuts, checked by invariants | 3 days every commit (`make test`); 30 days in its own CI job (`make month`) |
 | Real AC from the Mac | Unix port | supervised short-timer runs; each write approved, state read back | M4 |
 | Device | Pico | Wi-Fi drop, power cycle mid-cycle, watchdog, heap trend, flash files | per milestone; soak before v1.0 |
 

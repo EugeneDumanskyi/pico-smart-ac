@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# Tiny HTTP client for the simulator tests (the app's own client, shell/daikin.py, comes with M1).
+# Tiny HTTP client for the simulator tests: raw bytes and status codes, which the app's client (shell/daikin.py) hides.
 import asyncio
 import json
 

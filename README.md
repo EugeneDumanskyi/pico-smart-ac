@@ -46,6 +46,7 @@ Needs `git`, `make`, a C compiler, Python 3 and `pipx`.
 make micropython   # build the Unix port once, into ~/.cache/smartac/
 make lint          # ruff and the license header check
 make test          # tests/run.py on the Unix port
+make month         # the app against the simulator for 30 simulated days (SEED=1)
 ```
 
 ## License

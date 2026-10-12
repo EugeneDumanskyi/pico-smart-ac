@@ -35,3 +35,7 @@ The real AC must be switched as little as possible, and every write to it needs 
   and it has far more RAM. Temperatures are kept in whole tenths (integers) in the core, and RAM and
   hardware behaviour are covered only by device tests and the soak.
 - Hardware-only code (`board/pico.py`, Wi-Fi supervisor details) is covered only by device tests and the soak.
+- The Unix port's ticks period is 2^62 ms, the Pico's 2^30 (about 12.4 days), so a host run never wraps by itself.
+  The month run (`sim/harness.py`) gives each simulated boot a ticks offset that starts it 0–3 days before the wrap.
+  The other half-period hazard, a stamp older than about 6 days, can't happen on the host at all; the core prunes
+  such stamps (rule selector, event ring), and only device tests and the soak cover it on the Pico.
