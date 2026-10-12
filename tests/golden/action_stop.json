@@ -1,0 +1,21 @@
+{
+  "name": "action_stop",
+  "profiles": "default",
+  "active": "day",
+  "settings": {},
+  "start_ms": 0,
+  "snapshot": null,
+  "steps": [
+    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 25, "hum": 60, "actions": [{"action": "stop"}], "expect": {"state": "IDLE", "cmds": [["event", "ignored"]]}},
+    {"t_s": 60, "temp": 30, "expect": {"state": "IDLE"}},
+    {"t_s": 120, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "auto"]], ["persist"]]}},
+    {"t_s": 125, "readback": true, "ac": [true, "cool", 26, "auto"], "actions": [{"action": "stop"}], "expect": {"state": "RUNNING", "cmds": [["persist"]]}},
+    {"t_s": 180, "temp": 29, "expect": {"state": "RUNNING", "cmds": [["event", "phase"], ["write", [true, "fan", null, "3"]], ["persist"]]}},
+    {"t_s": 185, "readback": true, "ac": [true, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 240, "to_s": 1320, "expect": {"state": "RUNNING"}},
+    {"t_s": 1380, "expect": {"state": "STOPPING", "cmds": [["write", [false, "fan", null, "3"]], ["persist"]]}},
+    {"t_s": 1385, "readback": true, "ac": [false, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 1440, "expect": {"state": "COOLDOWN", "cmds": [["event", "cycle_end"], ["persist"]]}},
+    {"t_s": 1500, "expect": {"state": "COOLDOWN"}}
+  ]
+}

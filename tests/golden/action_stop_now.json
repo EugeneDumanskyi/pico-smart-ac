@@ -1,0 +1,21 @@
+{
+  "name": "action_stop_now",
+  "profiles": "default",
+  "active": "day",
+  "settings": {},
+  "start_ms": 0,
+  "snapshot": null,
+  "steps": [
+    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 30, "hum": 70, "expect": {"state": "IDLE"}},
+    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "auto"]], ["persist"]]}},
+    {"t_s": 65, "readback": true, "ac": [true, "cool", 26, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 120, "temp": 29, "actions": [{"action": "stop_now"}], "expect": {"state": "STOPPING", "cmds": [["write", [false, "cool", 26, "auto"]], ["persist"]]}},
+    {"t_s": 125, "readback": true, "ac": [false, "cool", 26, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 180, "expect": {"state": "COOLDOWN", "cmds": [["event", "cycle_end"], ["persist"]]}},
+    {"t_s": 240, "ac": [true, "cool", 24, "2"], "expect": {"state": "MANUAL", "cmds": [["event", "manual"], ["persist"]]}},
+    {"t_s": 300, "actions": [{"action": "stop_now"}], "expect": {"state": "STOPPING", "cmds": [["event", "takeover"], ["write", [false, "cool", 24, "2"]], ["persist"]]}},
+    {"t_s": 305, "readback": true, "ac": [false, "cool", 24, "2"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 360, "expect": {"state": "IDLE", "cmds": [["event", "cycle_end"], ["persist"]]}},
+    {"t_s": 420, "expect": {"state": "IDLE"}}
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "pause_leave",
+  "profiles": "default",
+  "active": "day",
+  "settings": {},
+  "start_ms": 0,
+  "snapshot": null,
+  "steps": [
+    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 30, "hum": 70, "expect": {"state": "IDLE"}},
+    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "auto"]], ["persist"]]}},
+    {"t_s": 65, "readback": true, "ac": [true, "cool", 26, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 120, "temp": 29, "actions": [{"action": "pause", "minutes": 60, "cycle": "leave"}], "expect": {"state": "PAUSED", "cmds": [["event", "pause"], ["persist"]]}},
+    {"t_s": 180, "to_s": 600, "expect": {"state": "PAUSED"}},
+    {"t_s": 660, "ac": [true, "cool", 24, "2"], "expect": {"state": "PAUSED"}},
+    {"t_s": 720, "to_s": 3660, "expect": {"state": "PAUSED"}},
+    {"t_s": 3720, "expect": {"state": "MANUAL", "cmds": [["event", "resume"], ["event", "manual"], ["persist"]]}},
+    {"t_s": 3780, "expect": {"state": "MANUAL"}}
+  ]
+}

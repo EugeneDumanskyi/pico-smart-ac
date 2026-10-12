@@ -1,0 +1,22 @@
+{
+  "name": "profile_off_mid_cycle",
+  "profiles": "default",
+  "active": "day",
+  "settings": {},
+  "start_ms": 0,
+  "snapshot": null,
+  "steps": [
+    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 30, "hum": 70, "expect": {"state": "IDLE"}},
+    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "auto"]], ["persist"]]}},
+    {"t_s": 65, "readback": true, "ac": [true, "cool", 26, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 120, "to_s": 300, "temp": 29, "expect": {"state": "RUNNING"}},
+    {"t_s": 360, "actions": [{"action": "set_profile", "profile": "off"}], "expect": {"state": "RUNNING", "cmds": [["event", "profile"], ["event", "phase"], ["write", [true, "fan", null, "3"]], ["persist"]]}},
+    {"t_s": 365, "readback": true, "ac": [true, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 420, "to_s": 1500, "temp": 30, "expect": {"state": "RUNNING"}},
+    {"t_s": 1560, "expect": {"state": "STOPPING", "cmds": [["write", [false, "fan", null, "3"]], ["persist"]]}},
+    {"t_s": 1565, "readback": true, "ac": [false, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 1620, "expect": {"state": "IDLE", "cmds": [["event", "cycle_end"], ["persist"]]}},
+    {"t_s": 1680, "ac": [true, "cool", 24, "2"], "expect": {"state": "IDLE"}},
+    {"t_s": 1740, "to_s": 1980, "expect": {"state": "IDLE"}}
+  ]
+}

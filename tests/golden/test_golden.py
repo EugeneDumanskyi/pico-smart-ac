@@ -7,12 +7,16 @@
 #    "steps": [step, ...]}
 #   step: {"t_s": seconds after start_ms, "ac": [power, mode, target °C | null, fan] | null (unreachable),
 #          "temp": °C, "hum": %, "readback": bool, "actions": [...], "reboot": bool,
+#          "configure": {"profiles": <profiles.json> | "default", "settings": {overrides}},
 #          "to_s": repeat the step every "every_s" (default 60) up to this time,
 #          "expect": {"state": ..., "cmds": [["write", [p, m, t °C, f]], ["event", kind], ["persist"]]}}
 #
 # ac, temp and hum carry over from the previous step when left out. "reboot" starts a new controller from the
-# last persisted snapshot (state.json survives a restart, RAM doesn't). "cmds" defaults to [], so every step is
-# checked. Event messages aren't pinned. A snapshot given in the file is in the persisted form (tenths of °C).
+# last persisted snapshot (state.json survives a restart, RAM doesn't). "configure" saves new config documents
+# before the step (Controller.configure): settings overrides are merged into the current settings, a new profiles
+# document keeps the current "active", and a later "reboot" uses the new documents. "cmds" defaults to [], so
+# every step is checked. Event messages aren't pinned. A snapshot given in the file is in the persisted form
+# (tenths of °C).
 import json
 import os
 import time
@@ -59,6 +63,16 @@ def _actual(cmds):
     return out
 
 
+def _configure(conf, profiles, settings):
+    if "profiles" in conf:
+        new = config.default_profiles() if conf["profiles"] == "default" else json.loads(json.dumps(conf["profiles"]))
+        new["active"] = profiles["active"]
+        profiles = new
+    settings = dict(settings)
+    settings.update(conf.get("settings", {}))
+    return profiles, settings
+
+
 def run_trace(tc, doc):
     profiles = config.default_profiles() if doc.get("profiles", "default") == "default" else doc["profiles"]
     if "active" in doc:
@@ -78,6 +92,9 @@ def run_trace(tc, doc):
         if "to_s" in step and actions:
             raise ValueError("step %d: actions can't repeat" % i)
         times = range(step["t_s"], step.get("to_s", step["t_s"]) + 1, step.get("every_s", 60))
+        if "configure" in step:
+            profiles, settings = _configure(step["configure"], profiles, settings)
+            ctl.configure(profiles, settings)
         if step.get("reboot"):
             if snap is not None:
                 profiles["active"] = snap["profile"]  # the shell keeps profiles.json "active" in step
@@ -104,7 +121,7 @@ def run_trace(tc, doc):
 
 class TestGolden(unittest.TestCase):
     def test_traces_present(self):
-        self.assertTrue(len(TRACES) >= 6, "golden traces missing: %r" % TRACES)
+        self.assertTrue(len(TRACES) >= 20, "golden traces missing: %r" % TRACES)
 
 
 def _make(path):

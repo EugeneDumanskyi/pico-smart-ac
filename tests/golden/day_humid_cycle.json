@@ -1,0 +1,24 @@
+{
+  "name": "day_humid_cycle",
+  "profiles": "default",
+  "active": "day",
+  "settings": {},
+  "start_ms": 0,
+  "snapshot": null,
+  "steps": [
+    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 28, "hum": 80, "expect": {"state": "IDLE"}},
+    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "dry", null, "auto"]], ["persist"]]}},
+    {"t_s": 65, "readback": true, "ac": [true, "dry", null, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 120, "to_s": 1200, "hum": 72, "expect": {"state": "RUNNING"}},
+    {"t_s": 1260, "hum": 65, "expect": {"state": "RUNNING", "cmds": [["event", "phase"], ["write", [true, "fan", null, "3"]], ["persist"]]}},
+    {"t_s": 1265, "readback": true, "ac": [true, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 1320, "to_s": 2400, "expect": {"state": "RUNNING"}},
+    {"t_s": 2460, "expect": {"state": "STOPPING", "cmds": [["write", [false, "fan", null, "3"]], ["persist"]]}},
+    {"t_s": 2465, "readback": true, "ac": [false, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 2520, "expect": {"state": "COOLDOWN", "cmds": [["event", "cycle_end"], ["persist"]]}},
+    {"t_s": 2580, "to_s": 5160, "temp": 30, "hum": 80, "expect": {"state": "COOLDOWN"}},
+    {"t_s": 5220, "expect": {"state": "IDLE", "cmds": [["persist"]]}},
+    {"t_s": 5280, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "auto"]], ["persist"]]}},
+    {"t_s": 5285, "readback": true, "ac": [true, "cool", 26, "auto"], "expect": {"cmds": [["persist"]]}}
+  ]
+}

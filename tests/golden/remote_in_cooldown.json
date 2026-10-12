@@ -1,0 +1,29 @@
+{
+  "name": "remote_in_cooldown",
+  "profiles": "default",
+  "active": "day",
+  "settings": {"manual_hold_min": 10, "finish_fan_min": 10},
+  "start_ms": 0,
+  "snapshot": null,
+  "steps": [
+    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 30, "hum": 70, "expect": {"state": "IDLE"}},
+    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "auto"]], ["persist"]]}},
+    {"t_s": 65, "readback": true, "ac": [true, "cool", 26, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 120, "temp": 26, "expect": {"state": "RUNNING", "cmds": [["event", "phase"], ["write", [true, "fan", null, "3"]], ["persist"]]}},
+    {"t_s": 125, "readback": true, "ac": [true, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 180, "to_s": 1260, "expect": {"state": "RUNNING"}},
+    {"t_s": 1320, "expect": {"state": "STOPPING", "cmds": [["write", [false, "fan", null, "3"]], ["persist"]]}},
+    {"t_s": 1325, "readback": true, "ac": [false, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 1380, "expect": {"state": "COOLDOWN", "cmds": [["event", "cycle_end"], ["persist"]]}},
+    {"t_s": 1440, "to_s": 1800, "temp": 27, "expect": {"state": "COOLDOWN"}},
+    {"t_s": 1860, "ac": [true, "cool", 24, "2"], "expect": {"state": "MANUAL", "cmds": [["event", "manual"], ["persist"]]}},
+    {"t_s": 1920, "to_s": 2400, "expect": {"state": "MANUAL"}},
+    {"t_s": 2460, "expect": {"state": "TAKEOVER", "cmds": [["event", "takeover"], ["write", [true, "fan", null, "2"]], ["persist"]]}},
+    {"t_s": 2465, "readback": true, "ac": [true, "fan", null, "2"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 2520, "to_s": 3000, "expect": {"state": "TAKEOVER"}},
+    {"t_s": 3060, "expect": {"state": "STOPPING", "cmds": [["write", [false, "fan", null, "2"]], ["persist"]]}},
+    {"t_s": 3065, "readback": true, "ac": [false, "fan", null, "2"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 3120, "expect": {"state": "IDLE", "cmds": [["event", "cycle_end"], ["persist"]]}},
+    {"t_s": 3180, "expect": {"state": "IDLE"}}
+  ]
+}

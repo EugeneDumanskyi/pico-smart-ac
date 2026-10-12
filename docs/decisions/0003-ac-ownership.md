@@ -15,20 +15,25 @@ also mid-cycle. Automation must never fight a human, and must not let a forgotte
    It stores the exact state it set (`expected`: power, mode, target, fan) in RAM and `state.json`.
 2. **Read before write.** Every write is decided from a read taken in the same control tick. If that read differs from
    `expected`, the write is dropped and the state becomes `MANUAL`.
-3. **Read back.** ~5 s after a write, read again. If it doesn't match what was written, retry once on the next tick;
-   a second mismatch means a human (or a rejected write): `MANUAL` with an event.
+3. **Read back.** ~5 s after a write, read again. A mismatch is a failed attempt, not yet a human: the AC may still be
+   applying the write. The write is sent again on the next tick; a second failed attempt means a rejected write:
+   `MANUAL` with a `write_failed` event. Human changes are detected on poll reads only (rule 2): a poll read that
+   shows a state we didn't set, other than the old state of a write not yet applied, is `MANUAL`.
 4. **Manual hold, then takeover.** An AC state we didn't set (changed during a cycle, or on when we were idle or just
    booted) gets `manual_hold_min` hands off; every new change restarts the hold. If the AC goes off and stays off for
    `manual_release_off_min`, back to `IDLE`. If the hold ends with the AC still on, `TAKEOVER`: fan for
    `finish_fan_min` if it was cooling or drying, then off. No takeover in the `off` profile or while paused.
 5. **Stopping is a state.** `STOPPING` repeats the off write each tick until a read confirms it. `COOLDOWN` starts only then.
+   Any read that shows the AC off ends the stop, whoever switched it off; failed attempts give an event, not `MANUAL`.
 6. **Hard cap is absolute.** At `hard_cap_min` total cycle time, off is written directly, skipping any fan phase.
 7. **Reboot.** If `state.json` says we own a cycle and the AC still matches `expected`, finish it at once: last fan
-   phase, then off. A cool/dry phase is never resumed. If it doesn't match, rule 4 applies.
+   phase, then off. A cool/dry phase is never resumed. If the AC is off and that is what we expected (our first write
+   never landed, or a stop was under way), the cycle just ends: off, then cooldown. If it doesn't match, rule 4 applies.
 8. **No backstop when the Pico is off.** Switching the Pico off mid-cycle leaves the AC to the remote. The AC's own
    off-timer is not used.
 9. **Pausing or switching to `off` during a cycle** asks the user: *finish* (fan, then off) or *leave running*
-   (we give up ownership; the AC is treated as a human's run once automation is active again).
+   (we give up ownership; the AC is treated as a human's run once automation is active again). A finish ends without
+   the cycle's cooldown. If a human changes the AC during a pause's finish, we let go and go straight to `PAUSED`.
 
 ## Consequences
 

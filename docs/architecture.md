@@ -24,7 +24,7 @@ the plan is in [roadmap.md](roadmap.md). Decisions: [decisions/](decisions/).
 | `core/rules.py` | core | condition evaluation, first-match rule selection, `confirm_reads` counting, `min_interval` |
 | `core/controller.py` | core | state machine: `step(now, reading, actions) → commands`; owns cycle, stopping, cooldown, manual hold, takeover, pause |
 | `core/history.py` | core | 1440 × 1-min ring buffer in preallocated `array`s; streamed JSON export |
-| `core/events.py` | core | event ring (~200), marks which events go to flash |
+| `core/events.py` | core | event ring (200), marks which events go to flash and owns the `events.log` line format |
 | `shell/daikin.py` | shell | async HTTP POST to `/dsiot/multireq`, hard timeout, one request at a time |
 | `shell/store.py` | shell | atomic JSON files (`.tmp` → rename, `.bak`), state snapshot, event log, crash log |
 | `shell/net.py` | shell | Wi-Fi supervisor (power-save off, reconnect, counters) |
@@ -65,7 +65,9 @@ read-modify-write of shared state, no `_thread` / second core.
 
 One control tick: read AC (this read is also the "read before write"), step, write at most one target state,
 wait ~5 s, read back. The read-back goes to `step(..., readback=True)`, which only confirms the write or counts a
-failed attempt. A read-back mismatch is retried once; a second one, or any later read that differs from what we set, → `MANUAL` (ADR 0003).
+failed attempt; human changes are detected on poll reads only. A failed attempt is retried on the next poll; a second
+one → `write_failed` and `MANUAL` (in `STOPPING` the off write keeps being retried). A poll read showing a state we
+didn't set → `MANUAL`; while a write is pending, the unchanged previous state counts as not applied yet (ADR 0003).
 
 ## Persistence and flash
 
@@ -73,7 +75,7 @@ failed attempt. A read-back mismatch is retried once; a second one, or any later
 |---|---|---|
 | `profiles.json`, `settings.json` (+ `.bak`) | user saves | ~0 |
 | `state.json` (cycle owner, expected AC state, pause, boot counter) | state transitions only | ≤ 50 |
-| `events.log` (rotating, 2 × 8 KB; boot counter + uptime, no timestamps) | cycle end, config save, override, takeover, reboot | ≤ 50 |
+| `events.log` (rotating, 2 × 8 KB; boot counter + uptime, no timestamps) | cycle end, config save, override, takeover, failed write, reboot | ≤ 50 |
 | `crash.txt` | before a deliberate reset or after an uncaught exception | ~0 |
 
 History stays in RAM (lost on reboot, accepted). Nothing is written per poll. littlefs spreads wear,

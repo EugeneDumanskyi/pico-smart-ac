@@ -98,20 +98,24 @@ Automation does nothing, not even the manual-hold takeover below. Kill switch.
 stateDiagram-v2
     [*] --> IDLE
     state Automation {
-        IDLE --> RUNNING : trigger matches
+        IDLE --> RUNNING : trigger matches / run
+        COOLDOWN --> RUNNING : run
         RUNNING --> RUNNING : next phase
-        RUNNING --> STOPPING : last phase done / hard cap
-        STOPPING --> COOLDOWN : end state confirmed
-        COOLDOWN --> IDLE : timer
+        RUNNING --> STOPPING : last phase done / hard cap / stop now
+        STOPPING --> COOLDOWN : off confirmed
+        STOPPING --> IDLE : off confirmed, no cooldown
+        COOLDOWN --> IDLE : timer / profile switch
         RUNNING --> MANUAL : AC state ≠ what we set
         STOPPING --> MANUAL : AC state ≠ what we set
+        TAKEOVER --> MANUAL : AC state ≠ what we set
         IDLE --> MANUAL : AC on, not started by us
         COOLDOWN --> MANUAL : AC on, not started by us
-        MANUAL --> IDLE : hold over, AC off
-        MANUAL --> TAKEOVER : hold over, AC still on
+        MANUAL --> IDLE : off streak / hold over, AC off
+        MANUAL --> TAKEOVER : hold over / clear / stop, AC still on
         TAKEOVER --> STOPPING
     }
     Automation --> PAUSED : pause (web)
+    STOPPING --> PAUSED : off confirmed, pause pending
     PAUSED --> IDLE : timer / resume
 ```
 
@@ -122,7 +126,16 @@ Ownership rules are in [ADR 0003](decisions/0003-ac-ownership.md): every write i
 (read before write), checked by a read-back ~5 s later, and automation never touches a state a human set
 until the manual hold is over.
 
-**STOPPING** writes off every tick until a read confirms it; only then does the cooldown start.
+**STOPPING** writes off every tick until a read confirms it; only then does the cooldown start. Any read that shows
+the AC off ends the stop, whoever switched it off.
+
+**Writes and reads.** Each write attempt is judged once, by its read-back (or by the next poll read if the
+read-back was missed). A mismatch counts as a failed attempt, and the write is sent again on the next poll. Two failed
+attempts → `write_failed` and `MANUAL` (in `STOPPING`: an event, and the off write keeps being retried). Human changes
+are detected on poll reads only: a read-back may catch the AC while it is still applying our write. The
+`RUNNING`/`TAKEOVER` timers (phase length, goals, hard cap) act only on a reachable poll read, but time keeps counting
+while the AC is unreachable. Actions that arrive on a read-back step, or before the first reachable read after a boot,
+are queued until the next poll step.
 
 **Manual override detection.** After each write, remember what we set (power, mode, target, fan).
 Each minute, compare it with what the AC reports. If it differs, a human used the remote or the app:
@@ -133,12 +146,23 @@ Each minute, compare it with what the AC reports. If it differs, a human used th
 If the AC is on and we didn't turn it on (for example, it was on when the Pico booted), also go MANUAL.
 
 **TAKEOVER.** If the hold is over and the AC is still on, the Pico ends the run the way a cycle ends:
-fan for `finish_fan_min` if the mode was cool or dry, then off. Not in the `off` profile and not while PAUSED.
+fan for `finish_fan_min` if the mode was cool or dry, then off, then `IDLE` (no cooldown). Not in the `off` profile and
+not while PAUSED. The hold also ends early on **Clear manual** or **Stop** (takeover with the fan phase) and on
+**Stop now** (takeover straight to off). A change by the human during the takeover goes back to `MANUAL` with a new
+hold.
+
+**Run** starts a rule of any profile at once from `IDLE` or `COOLDOWN` (AC off), skipping its trigger and
+`min_interval_min`. **Stop** ends a running cycle the way "finish" does (fan phase, then off); **Stop now** writes off
+at once.
 
 **PAUSED** is set from the web page (1 h, 2 h, 8 h, or until resumed). Pausing, or switching to the `off` profile,
 while a cycle runs asks what to do with the AC:
 - **finish**: fan phase, then off (the default button);
 - **leave running**: the Pico stops controlling and leaves the AC as it is (it becomes a human's run).
+
+With **finish**, the state becomes `PAUSED` once off is confirmed (the pause time counts from the press); if a human
+changes the AC before that, the Pico lets go and goes straight to `PAUSED`. Switching profile with **finish** ends the
+cycle without its cooldown (`IDLE`, then the new profile's rules); a switch during `COOLDOWN` ends the cooldown.
 
 ## Safety
 
@@ -150,8 +174,9 @@ while a cycle runs asks what to do with the AC:
   - hardware watchdog, fed only while the control loop is healthy;
   - Wi-Fi supervisor: reconnect, reset after 15 min offline (details in [architecture.md](architecture.md#failure-handling));
   - on boot, read the AC state. If the saved state says "we started it" **and** the AC still matches what we set,
-    finish the cycle at once (last fan phase, then off; a cool/dry phase is never resumed). Otherwise it's a human's
-    run: MANUAL, then TAKEOVER.
+    finish the cycle at once (last fan phase, then off; a cool/dry phase is never resumed). If the AC is off and
+    our first write never landed, or a stop was under way, the cycle just ends (off, then cooldown). Otherwise it's a
+    human's run: MANUAL, then TAKEOVER.
 - **Pico switched off by the owner mid-cycle**: no backstop on purpose; the AC is under remote control until the Pico
   is back.
 - **Sanity checks**: ignore readings that are out of range, and don't start a cycle on a single reading;
@@ -329,8 +354,9 @@ Large responses (`/api/history`, the UI files) are streamed in chunks. Times are
 
 ### History storage
 - Ring buffer in RAM: 1440 one-minute samples × 5 values ≈ 10 KB. Lost on reboot (acceptable).
-- Events: last ~200 in RAM; only config saves, cycle summaries, overrides and reboots are also appended to a small
-  rotating file on flash with the boot number (a few writes per day, so flash wear doesn't matter).
+- Events: last ~200 in RAM; only config saves, cycle summaries, overrides, takeovers, failed writes and reboots are
+  also appended to a small rotating file on flash with the boot number (a few writes per day, so flash wear doesn't
+  matter).
 
 ## Later ideas (not in v1)
 
