@@ -1,0 +1,25 @@
+{
+  "name": "remote_mid_cycle",
+  "profiles": "default",
+  "active": "day",
+  "settings": {"manual_hold_min": 10, "finish_fan_min": 10},
+  "start_ms": 0,
+  "snapshot": null,
+  "steps": [
+    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 30, "hum": 70},
+    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "auto"]], ["persist"]]}},
+    {"t_s": 65, "readback": true, "ac": [true, "cool", 26, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 120, "to_s": 240, "temp": 29},
+    {"t_s": 300, "ac": [true, "cool", 24, "2"], "expect": {"state": "MANUAL", "cmds": [["event", "manual"], ["persist"]]}},
+    {"t_s": 360, "to_s": 540, "temp": 27, "expect": {"state": "MANUAL"}},
+    {"t_s": 600, "ac": [true, "cool", 23, "2"], "expect": {"state": "MANUAL"}},
+    {"t_s": 660, "to_s": 1140, "expect": {"state": "MANUAL"}},
+    {"t_s": 1200, "expect": {"state": "TAKEOVER", "cmds": [["event", "takeover"], ["write", [true, "fan", null, "2"]], ["persist"]]}},
+    {"t_s": 1205, "readback": true, "ac": [true, "fan", null, "2"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 1260, "to_s": 1740, "expect": {"state": "TAKEOVER"}},
+    {"t_s": 1800, "expect": {"state": "STOPPING", "cmds": [["write", [false, "fan", null, "2"]], ["persist"]]}},
+    {"t_s": 1805, "readback": true, "ac": [false, "fan", null, "2"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 1860, "expect": {"state": "IDLE", "cmds": [["event", "cycle_end"], ["persist"]]}},
+    {"t_s": 1920, "expect": {"state": "IDLE"}}
+  ]
+}

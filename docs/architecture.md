@@ -64,7 +64,8 @@ read-modify-write of shared state, no `_thread` / second core.
 ```
 
 One control tick: read AC (this read is also the "read before write"), step, write at most one target state,
-wait ~5 s, read back. A read-back mismatch is retried once; a second one, or any later read that differs from what we set, → `MANUAL` (ADR 0003).
+wait ~5 s, read back. The read-back goes to `step(..., readback=True)`, which only confirms the write or counts a
+failed attempt. A read-back mismatch is retried once; a second one, or any later read that differs from what we set, → `MANUAL` (ADR 0003).
 
 ## Persistence and flash
 

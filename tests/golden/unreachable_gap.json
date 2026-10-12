@@ -1,0 +1,23 @@
+{
+  "name": "unreachable_gap",
+  "profiles": "default",
+  "active": "day",
+  "settings": {},
+  "start_ms": 0,
+  "snapshot": null,
+  "steps": [
+    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 30, "hum": 70},
+    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "auto"]], ["persist"]]}},
+    {"t_s": 65, "readback": true, "ac": [true, "cool", 26, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 120, "to_s": 1200, "temp": 29, "expect": {"state": "RUNNING"}},
+    {"t_s": 1260, "to_s": 1320, "ac": null, "expect": {"state": "RUNNING"}},
+    {"t_s": 1380, "expect": {"state": "RUNNING", "cmds": [["event", "unreachable"]]}},
+    {"t_s": 1440, "to_s": 1920, "expect": {"state": "RUNNING"}},
+    {"t_s": 1980, "ac": [true, "cool", 26, "auto"], "temp": 28, "expect": {"state": "RUNNING", "cmds": [["event", "phase"], ["write", [true, "fan", null, "3"]], ["persist"]]}},
+    {"t_s": 1985, "readback": true, "ac": [true, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 2040, "to_s": 3120, "expect": {"state": "RUNNING"}},
+    {"t_s": 3180, "expect": {"state": "STOPPING", "cmds": [["write", [false, "fan", null, "3"]], ["persist"]]}},
+    {"t_s": 3185, "readback": true, "ac": [false, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 3240, "expect": {"state": "COOLDOWN", "cmds": [["event", "cycle_end"], ["persist"]]}}
+  ]
+}

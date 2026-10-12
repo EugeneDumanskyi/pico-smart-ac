@@ -63,6 +63,7 @@ EV_UNREACHABLE = "unreachable"
 EV_WRITE_FAILED = "write_failed"
 EV_WOULD = "would"  # dry_run: a write that was not sent
 EV_CONFIG_SAVED = "config_saved"
+EV_IGNORED = "ignored"  # an action that doesn't apply in the current state
 
 
 def tenths(celsius):
