@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Fixtures are built in the multireq response shape (responses[].pc.pch tree, see docs/DAIKIN_API.md
 # and tools/daikin_status.py) with made-up values; no addresses or identifiers.
+import json
 import unittest
 
 from smartac.core import daikin_codec as codec
@@ -202,3 +203,205 @@ class TestRangeChecks(unittest.TestCase):
         r = codec.decode(response(indoor_root("01", "0200", {"p_02": "42", "p_09": "0A00"})))  # 33 °C
         self.assertIsNone(r.ac.target)
         self.assertEqual(r.ac.mode, t.MODE_COOL)
+
+
+class TestLeHex(unittest.TestCase):
+    def test_values(self):
+        self.assertEqual(codec.le_hex(46, 1), "2E")
+        self.assertEqual(codec.le_hex(63, 2), "3F00")
+        self.assertEqual(codec.le_hex(256, 2), "0001")
+        self.assertEqual(codec.le_hex(0, 1), "00")
+
+    def test_negative_twos_complement(self):
+        self.assertEqual(codec.le_hex(-5, 2), "FBFF")
+        self.assertEqual(codec.le_hex(-10, 1), "F6")
+        self.assertEqual(codec.le_hex(-128, 1), "80")
+
+    def test_round_trip(self):
+        for value in (0, 1, 45, 127, 255):
+            self.assertEqual(codec.le_int(codec.le_hex(value, 1)), value)
+        for value in (-32768, -61, -1, 0, 63, 32767):
+            self.assertEqual(codec.le_int(codec.le_hex(value, 2), signed=True), value)
+
+    def test_rejects(self):
+        for value, nbytes in ((256, 1), (-129, 1), (65536, 2), (1.5, 1), (True, 1), ("1", 1), (1, 0)):
+            with self.assertRaises(ValueError):
+                codec.le_hex(value, nbytes)
+
+
+def params_of(state):
+    return [tuple(p) for p in codec.write_params(state)]
+
+
+class TestWriteParams(unittest.TestCase):
+    def test_cool_full(self):
+        self.assertEqual(
+            params_of(t.ACState(True, t.MODE_COOL, 260, t.FAN_AUTO)),
+            [
+                ("e_A002", "p_01", "01"),
+                ("e_3001", "p_01", "0200"),
+                ("e_3001", "p_02", "34"),
+                ("e_3001", "p_09", "0A00"),
+            ],
+        )
+
+    def test_half_degree_target(self):
+        self.assertIn(("e_3001", "p_02", "2D"), params_of(t.ACState(True, t.MODE_COOL, 225, None)))
+
+    def test_target_limits_inclusive(self):
+        self.assertIn(("e_3001", "p_02", "14"), params_of(t.ACState(True, t.MODE_COOL, 100, None)))
+        self.assertIn(("e_3001", "p_02", "40"), params_of(t.ACState(True, t.MODE_COOL, 320, None)))
+
+    def test_dry_and_fan_use_their_fan_field(self):
+        self.assertEqual(
+            params_of(t.ACState(True, t.MODE_DRY, None, t.FAN_QUIET)),
+            [("e_A002", "p_01", "01"), ("e_3001", "p_01", "0500"), ("e_3001", "p_27", "0B00")],
+        )
+        self.assertEqual(
+            params_of(t.ACState(True, t.MODE_FAN, None, "3")),
+            [("e_A002", "p_01", "01"), ("e_3001", "p_01", "0000"), ("e_3001", "p_28", "0500")],
+        )
+
+    def test_on_without_target_or_fan(self):
+        self.assertEqual(
+            params_of(t.ACState(True, t.MODE_COOL)), [("e_A002", "p_01", "01"), ("e_3001", "p_01", "0200")]
+        )
+
+    def test_off_is_power_only(self):
+        # The controller's off state carries mode, target and fan; only power is written (tested path).
+        for state in (t.ACState(False, t.MODE_COOL, 260, t.FAN_AUTO), t.ACState(False, t.MODE_HEAT, 999, "x")):
+            self.assertEqual(params_of(state), [("e_A002", "p_01", "00")])
+
+    def test_rejects(self):
+        bad = (
+            t.ACState(True, t.MODE_HEAT, 220, "1"),
+            t.ACState(True, t.MODE_AUTO, None, None),
+            t.ACState(True, t.MODE_UNKNOWN),
+            t.ACState(True, t.MODE_COOL, 95, None),  # below 10 C
+            t.ACState(True, t.MODE_COOL, 325, None),  # above 32 C
+            t.ACState(True, t.MODE_COOL, 263, None),  # not a half degree
+            t.ACState(True, t.MODE_COOL, 26.0, None),  # not tenths
+            t.ACState(True, t.MODE_DRY, 260, None),  # target outside cool
+            t.ACState(True, t.MODE_FAN, 260, "1"),
+            t.ACState(True, t.MODE_COOL, 260, "6"),  # unknown fan
+            t.ACState(1, t.MODE_COOL, 260, None),  # non-bool power
+            t.ACState(None, t.MODE_COOL),
+            None,
+        )
+        for state in bad:
+            with self.assertRaises(ValueError):
+                codec.write_params(state)
+
+    def test_never_writes_streamer_or_outdoor(self):
+        groups = set()
+        for power in (True, False):
+            for mode in t.MODES + (t.MODE_UNKNOWN,):
+                for target in (None, 100, 225, 260, 320):
+                    for fan in (None,) + t.FANS:
+                        try:
+                            params = codec.write_params(t.ACState(power, mode, target, fan))
+                        except ValueError:
+                            continue
+                        groups.update(g for g, _, _ in params)
+        self.assertEqual(groups, {"e_A002", "e_3001"})
+
+
+def apply_write(root, params):
+    # Apply parsed write params to an indoor_root() fixture, like the unit does.
+    for group, param, pv in params:
+        g = next(c for c in root["pch"] if c["pn"] == group)
+        for c in g["pch"]:
+            if c["pn"] == param:
+                c["pv"] = pv
+                break
+        else:
+            g["pch"].append(leaf(param, pv))
+    return root
+
+
+class TestWriteRequest(unittest.TestCase):
+    def test_tested_power_and_mode_write(self):
+        # The exact body that switched the unit on in cool on 2026-10-08 (docs/DAIKIN_API.md).
+        want = (
+            '{"requests":[{"op":3,"to":"/dsiot/edge/adr_0100.dgc_status","pc":{"pn":"dgc_status","pch":'
+            '[{"pn":"e_1002","pch":[{"pn":"e_A002","pch":[{"pn":"p_01","pv":"01"}]},'
+            '{"pn":"e_3001","pch":[{"pn":"p_01","pv":"0200"}]}]}]}}]}'
+        )
+        self.assertEqual(codec.write_request(t.ACState(True, t.MODE_COOL)), json.loads(want))
+
+    def test_off_request(self):
+        req = codec.write_request(t.ACState(False, t.MODE_FAN, None, "3"))
+        groups = req["requests"][0]["pc"]["pch"][0]["pch"]
+        self.assertEqual(groups, [{"pn": "e_A002", "pch": [{"pn": "p_01", "pv": "00"}]}])
+
+    def test_no_streamer_in_any_request(self):
+        for state in (t.ACState(True, t.MODE_COOL, 260, "auto"), t.ACState(True, t.MODE_DRY, None, "quiet")):
+            self.assertFalse("e_3003" in json.dumps(codec.write_request(state)))
+
+    def test_round_trip_through_parse_write(self):
+        states = (
+            t.ACState(True, t.MODE_COOL, 225, "5"),
+            t.ACState(True, t.MODE_DRY, None, t.FAN_AUTO),
+            t.ACState(True, t.MODE_FAN, None, t.FAN_QUIET),
+        )
+        for state in states:
+            params, error = codec.parse_write(codec.write_request(state))
+            self.assertIsNone(error)
+            root = apply_write(indoor_root("00", "0000", dict(COOL_E3001)), params)
+            self.assertEqual(codec.decode(response(root)).ac, state)
+        # Off: power off, mode (and its fan) as before.
+        params, _ = codec.parse_write(codec.write_request(t.ACState(False, t.MODE_COOL, 260, "auto")))
+        root = apply_write(indoor_root("01", "0000", dict(COOL_E3001)), params)
+        self.assertEqual(codec.decode(response(root)).ac, t.ACState(False, t.MODE_FAN, None, "3"))
+
+
+class TestParseWrite(unittest.TestCase):
+    def test_errors(self):
+        good = codec.write_request(t.ACState(True, t.MODE_COOL))
+
+        def changed(fn):
+            body = json.loads(json.dumps(good))
+            fn(body)
+            return body
+
+        bad = (
+            None,
+            {},
+            {"requests": []},
+            {"requests": good["requests"] * 2},
+            codec.READ_REQUEST,
+            changed(lambda b: b["requests"][0].update(op=2)),
+            changed(lambda b: b["requests"][0].update(to=codec.OUTDOOR)),
+            changed(lambda b: b["requests"][0].update(to=codec.INDOOR + "?filter=pv")),
+            changed(lambda b: b["requests"][0].update(pc=None)),
+            changed(lambda b: b["requests"][0]["pc"].update(pn="x")),
+            changed(lambda b: b["requests"][0]["pc"]["pch"][0].update(pn="e_1003")),
+            changed(lambda b: b["requests"][0]["pc"]["pch"][0].update(pch=[])),
+            changed(lambda b: b["requests"][0]["pc"]["pch"][0]["pch"][0].update(pch="x")),
+            changed(lambda b: b["requests"][0]["pc"]["pch"][0]["pch"][0]["pch"][0].update(pv=1)),
+        )
+        for body in bad:
+            params, error = codec.parse_write(body)
+            self.assertIsNone(params)
+            self.assertTrue(error)
+
+    def test_passes_unknown_params_through(self):
+        # Validation against what the unit accepts is the simulator's job.
+        body = codec.write_request(t.ACState(True, t.MODE_FAN))
+        body["requests"][0]["pc"]["pch"][0]["pch"].append({"pn": "e_3003", "pch": [{"pn": "p_20", "pv": "01"}]})
+        params, error = codec.parse_write(body)
+        self.assertIsNone(error)
+        self.assertEqual(params[-1], ("e_3003", "p_20", "01"))
+
+
+class TestWriteResult(unittest.TestCase):
+    def test_accepted(self):
+        self.assertIsNone(codec.write_result({"responses": [{"fr": codec.INDOOR, "rsc": 2004}]}))
+
+    def test_rejected(self):
+        self.assertEqual(codec.write_result({"responses": [{"fr": codec.INDOOR, "rsc": 4000}]}), "rsc 4000")
+        self.assertEqual(codec.write_result({"responses": [{"rsc": 2004}, {"rsc": 2000}]}), "rsc 2000")
+
+    def test_malformed(self):
+        for resp in (None, [], {}, {"responses": []}, {"responses": [None]}, {"responses": [{"fr": "x"}]}):
+            self.assertEqual(codec.write_result(resp), "malformed response")

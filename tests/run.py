@@ -11,6 +11,7 @@ SUITE_DIRS = ("unit", "golden", "integration")
 TESTS = __file__.rsplit("/", 1)[0] if "/" in __file__ else "."
 sys.path.insert(0, TESTS + "/lib")
 sys.path.insert(0, TESTS + "/../src")
+sys.path.insert(0, TESTS + "/..")  # the sim package
 
 import unittest  # noqa: E402  (vendored copy, found through the path above)
 

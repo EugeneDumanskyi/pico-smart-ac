@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Daikin dsiot encoding (docs/DAIKIN_API.md). Read side: parsed multireq JSON -> Reading.
+# Write side: ACState -> op-3 request, and the response -> error or None.
 # Pure: the shell does the HTTP POST and json.loads, this module only maps values.
 from smartac.core.types import (
     FAN_AUTO,
@@ -27,12 +28,20 @@ READ_REQUEST = {
 }
 
 RSC_READ_OK = 2000
+RSC_WRITE_OK = 2004  # write accepted (tested)
+RSC_REJECTED = 4000  # write rejected (streamer write, tested)
 
 MODE_CODES = {"0000": MODE_FAN, "0100": MODE_HEAT, "0200": MODE_COOL, "0300": MODE_AUTO, "0500": MODE_DRY}
 FAN_CODES = {"0A00": FAN_AUTO, "0B00": FAN_QUIET, "0300": "1", "0400": "2", "0500": "3", "0600": "4", "0700": "5"}
 # Per-mode parameters inside e_1002/e_3001.
 SETPOINT_PARAM = {MODE_COOL: "p_02", MODE_HEAT: "p_03", MODE_AUTO: "p_1D"}
 FAN_PARAM = {MODE_COOL: "p_09", MODE_HEAT: "p_0A", MODE_AUTO: "p_26", MODE_DRY: "p_27", MODE_FAN: "p_28"}
+MODE_VALUES = {v: k for k, v in MODE_CODES.items()}
+FAN_VALUES = {v: k for k, v in FAN_CODES.items()}
+# Modes the controller writes. Heat and auto are only ever set from the remote.
+WRITE_MODES = (MODE_COOL, MODE_DRY, MODE_FAN)
+POWER = ("e_A002", "p_01")
+MODE = ("e_3001", "p_01")
 
 # Sanity ranges in degrees C / percent, inclusive. temp and hum can be overridden from
 # settings.json sensor_limits; outdoor and target are fixed.
@@ -57,6 +66,22 @@ def le_int(hexstr, signed=False):
     if signed and value >= 1 << (bits - 1):
         value -= 1 << bits
     return value
+
+
+def le_hex(value, nbytes):
+    # int -> little-endian hex string of nbytes ("2E", "F6FF"); the inverse of le_int. Negative values are
+    # written in two's complement. Raises ValueError if the value doesn't fit.
+    if not isinstance(value, int) or isinstance(value, bool) or nbytes < 1:
+        raise ValueError("bad value")
+    bits = nbytes * 8
+    if value < -(1 << (bits - 1)) or value >= 1 << bits:
+        raise ValueError("value out of range")
+    value &= (1 << bits) - 1
+    out = ""
+    for _ in range(nbytes):
+        out += "%02X" % (value & 0xFF)
+        value >>= 8
+    return out
 
 
 def _child(node, name):
@@ -154,3 +179,92 @@ def decode(response, limits=None):
         out = _int(outdoor, ("e_A00D", "p_01"), signed=True)
         out = _in_range(None if out is None else out * 5, (tenths(OUTDOOR_LIMITS[0]), tenths(OUTDOOR_LIMITS[1])))
     return Reading(ac, temp=temp, hum=hum, outdoor_temp=out)
+
+
+def write_params(state):
+    # ACState -> [(group, param, pv)] in e_1002, in write order. Raises ValueError on a state we don't write.
+    # Off is power alone (tested: the AC keeps its mode, target and fan). On writes power, mode, the cool target
+    # if set, and the mode's fan if set.
+    # Untested on the real unit (docs/DAIKIN_API.md): dry 0500 (S2), a fan-speed change (S3; only an unchanged
+    # p_28 was written), and power + mode + target + fan in one request (S5 confirmed power + mode only).
+    if not isinstance(state, ACState) or not isinstance(state.power, bool):
+        raise ValueError("bad power")
+    if not state.power:
+        return [POWER + ("00",)]
+    mode = state.mode
+    if mode not in WRITE_MODES:
+        raise ValueError("mode %r is not written" % (mode,))
+    params = [POWER + ("01",), MODE + (MODE_VALUES[mode],)]
+    target = state.target
+    if target is not None:
+        if mode not in SETPOINT_PARAM:
+            raise ValueError("no target in mode %r" % (mode,))
+        if not isinstance(target, int) or isinstance(target, bool) or target % 5:
+            raise ValueError("target must be whole tenths in 0.5 C steps")
+        if _in_range(target, (tenths(TARGET_LIMITS[0]), tenths(TARGET_LIMITS[1]))) is None:
+            raise ValueError("target out of range")
+        params.append(("e_3001", SETPOINT_PARAM[mode], le_hex(target // 5, 1)))
+    if state.fan is not None:
+        if state.fan not in FAN_VALUES:
+            raise ValueError("bad fan %r" % (state.fan,))
+        params.append(("e_3001", FAN_PARAM[mode], FAN_VALUES[state.fan]))
+    return params
+
+
+def write_request(state):
+    # ACState -> op-3 multireq body for the indoor unit. Raises ValueError like write_params.
+    groups = []
+    for group, param, pv in write_params(state):
+        if not groups or groups[-1]["pn"] != group:
+            groups.append({"pn": group, "pch": []})
+        groups[-1]["pch"].append({"pn": param, "pv": pv})
+    pc = {"pn": "dgc_status", "pch": [{"pn": "e_1002", "pch": groups}]}
+    return {"requests": [{"op": 3, "to": INDOOR, "pc": pc}]}
+
+
+def parse_write(body):
+    # Parsed op-3 body -> (params, error): [(group, param, pv)] in e_1002, or (None, why).
+    # Accepts exactly one op-3 entry to INDOOR; used by the simulator.
+    if not isinstance(body, dict) or not isinstance(body.get("requests"), list) or len(body["requests"]) != 1:
+        return None, "expected one request"
+    req = body["requests"][0]
+    if not isinstance(req, dict) or req.get("op") != 3:
+        return None, "not a write"
+    if req.get("to") != INDOOR:
+        return None, "not the indoor unit"
+    pc = req.get("pc")
+    if not isinstance(pc, dict) or pc.get("pn") != "dgc_status" or not isinstance(pc.get("pch"), list):
+        return None, "malformed write"
+    if len(pc["pch"]) != 1 or not isinstance(pc["pch"][0], dict) or pc["pch"][0].get("pn") != "e_1002":
+        return None, "malformed write"
+    groups = pc["pch"][0].get("pch")
+    if not isinstance(groups, list):
+        return None, "malformed write"
+    params = []
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("pn"), str):
+            return None, "malformed write"
+        if not isinstance(group.get("pch"), list):
+            return None, "malformed write"
+        for leaf in group["pch"]:
+            if not isinstance(leaf, dict) or not isinstance(leaf.get("pn"), str):
+                return None, "malformed write"
+            if not isinstance(leaf.get("pv"), str):
+                return None, "malformed write"
+            params.append((group["pn"], leaf["pn"], leaf["pv"]))
+    if not params:
+        return None, "empty write"
+    return params, None
+
+
+def write_result(response):
+    # Parsed response to write_request -> None if accepted, else why ("rsc 4000", "malformed response").
+    # Only rsc is checked: the rest of the body ({"responses":[{"fr":..., "rsc":2004}]}) is assumed, not tested.
+    if not isinstance(response, dict) or not isinstance(response.get("responses"), list) or not response["responses"]:
+        return "malformed response"
+    for r in response["responses"]:
+        if not isinstance(r, dict) or "rsc" not in r:
+            return "malformed response"
+        if r["rsc"] != RSC_WRITE_OK:
+            return "rsc %s" % (r["rsc"],)
+    return None

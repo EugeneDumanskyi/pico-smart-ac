@@ -58,5 +58,6 @@ if mode in FANSPEED:
 print("Room temp:     %d °C" % room_t)
 print("Room humidity: %d %%" % room_h)
 print("Outdoor temp:  %.1f °C" % out_t)
-wp = {c["pn"]: c["pv"] for c in power["pc"]["pch"]}
-print("Today runtime: %s min" % wp.get("today_runtime"))
+if "pc" in power:  # not answered by the simulator (rsc 4000)
+    wp = {c["pn"]: c["pv"] for c in power["pc"]["pch"]}
+    print("Today runtime: %s min" % wp.get("today_runtime"))

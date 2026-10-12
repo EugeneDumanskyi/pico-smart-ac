@@ -84,7 +84,7 @@ First tasks, in order:
 | | |
 |---|---|
 | Goal | All decision logic done and tested without hardware. |
-| Scope | `core/config.py` (defaults, validation, error paths), `core/rules.py`, `core/controller.py` (all states incl. `STOPPING` and `TAKEOVER`, ADR 0003/0004), events; `sim/` fake Daikin + room model; golden traces; a runner that drives the app against the simulator. |
+| Scope | `core/config.py` (defaults, validation, error paths), `core/rules.py`, `core/controller.py` (all states incl. `STOPPING` and `TAKEOVER`, ADR 0003/0004), events; the codec's write side (pulled forward from M4: the simulator parses the same writes); `sim/` fake Daikin + room model; golden traces; a runner that drives the app against the simulator. |
 | Out of scope | Pico, HTTP API beyond what the runner needs, UI. |
 | Deliverables | Core modules; ≥ 20 golden traces (each default profile, remote press in every state, AC on at boot, hold then takeover, unreachable AC, reboot mid-cycle, hard cap, config change mid-cycle, pause finish/leave, ticks wrap). |
 | Done when | Unit and golden tests pass on the Unix port; a simulated month at 1000× speed runs with no stuck state. |
@@ -110,7 +110,7 @@ First tasks, in order:
 | | |
 |---|---|
 | Goal | Automation controls the real AC safely. |
-| Scope | Write path in the codec and client, read-back, `MANUAL`, `TAKEOVER`, `STOPPING`, boot recovery. First from the Mac (Unix port, short timers), then on the Pico. |
+| Scope | Write path in the client (the codec's write side is done in M2 and tested against the simulator only), read-back, `MANUAL`, `TAKEOVER`, `STOPPING`, boot recovery. First from the Mac (Unix port, short timers), then on the Pico. |
 | Out of scope | UI actions (M5). |
 | Deliverables | Safety checklist with results: remote press in each phase; Daikin app change; AC on at boot → hold → takeover; Pico switched off mid-cycle and back on (AC untouched → finished; AC changed → hold); Wi-Fi off mid-cycle; AC unreachable at the end of a phase; hard cap hit; config saved mid-cycle. |
 | Done when | Every checklist case passes on the real AC, and the AC ends in the expected state each time. |

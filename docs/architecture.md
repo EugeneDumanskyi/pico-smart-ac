@@ -32,6 +32,10 @@ the plan is in [roadmap.md](roadmap.md). Decisions: [decisions/](decisions/).
 | `shell/app.py` | shell | wiring and the asyncio tasks below |
 | `board/base.py` | shell | `Board` interface: Wi-Fi, watchdog, LED, reset, reset cause |
 | `board/pico.py`, `board/host.py` | shell | real hardware / no-op + fake time for the Unix port |
+| `sim/clock.py` | sim | `FakeClock` (moves only when told, can start near the ticks wrap), `ScaledClock` (real time × speed); any callable returning ticks works as the clock |
+| `sim/room.py` | sim | room model: temperature, humidity and a wet coil per minute, sensors rounded like the AC's |
+| `sim/device.py` | sim | `FakeDaikin`: raw indoor/outdoor params, reads, validated writes, scripted remote presses, outages, rejected or ignored writes; no I/O |
+| `sim/server.py`, `sim/run.py` | sim | minimal HTTP/1.1 on 127.0.0.1 (one request per connection); standalone runner for manual pokes |
 | `www/` | assets | single-page UI (vanilla JS, no framework, no CDN), gzipped at build time |
 
 Logging: user-facing **events** (ring in RAM, cycle summaries and config saves appended to flash),
@@ -147,7 +151,7 @@ src/                     copied to the Pico root
   lib/microdot/          vendored, pinned (docs/firmware.md)
   www/                   built, gzipped UI assets
 web/                     UI sources (index.html, app.js, style.css)
-sim/                     fake Daikin HTTP server + room model (MicroPython)
+sim/                     fake Daikin + room model (MicroPython, Unix port): clock, room, device, server, run.py
 tests/run.py             test runner (Unix port)
 tests/lib/               vendored micropython-lib unittest
 tests/unit/              core tests, unittest style

@@ -28,6 +28,25 @@ Full cycle from the Pico 2 W (MicroPython v1.29.0, blocking `requests`), 2026-10
 - Room readings (1-min reads): cool 10 min took 29 °C / 80 % to 27 °C / 70 %. Temperature is whole degrees
   and moves slowly; humidity reacts faster and rose back to 75–80 % in fan mode and after off (coil drying).
 
+## Write format used by the codec
+
+`core/daikin_codec.py` (`write_request`) builds one op-3 request to the indoor unit, groups in this order:
+
+| AC state | Params written |
+|---|---|
+| off | `e_A002/p_01 = 00` only. Mode, target and fan stay as they are (tested 2026-10-08). |
+| on (cool, dry, fan) | `e_A002/p_01 = 01`, `e_3001/p_01 = mode`, cool target `e_3001/p_02` if set, the mode's fan param if set |
+
+It never writes `e_3003` (streamer, mold-proof candidates) or anything outdoor, and refuses heat and auto (only the
+remote sets those). A write counts as done when every response has `rsc 2004`.
+
+Still untested on the real unit (the simulator assumes they work like the tested writes):
+- dry mode `0500` as a write (S2);
+- a real fan-speed **change** (S3; only an unchanged `p_28` was written);
+- power + mode + target + fan in **one** request (S5 confirmed power + mode only);
+- the write response body beyond `rsc`: `{"responses":[{"fr":"/dsiot/edge/adr_0100.dgc_status","rsc":2004}]}` is
+  assumed.
+
 Paths below are relative to `/dsiot/edge/adr_0100.dgc_status/dgc_status/e_1002` (indoor)
 or `/dsiot/edge/adr_0200.dgc_status/dgc_status/e_1003` (outdoor).
 Multi-byte numbers are little-endian hex.
