@@ -84,6 +84,24 @@ Same method as S2, fan mode only (no compressor). The AC started off in fan, spe
 - A fan-speed change is writable together with power and mode in one request, and is applied while running.
 - `e_3003/p_37` follows power (00 off, 02 on) in fan mode too; `p_2F` did not move in fan mode (it did in dry).
 
+## Cool with target and fan in one request (spike S5, 2026-10-16)
+
+Same method. The AC started off in fan, speed 3, with a stored cool target of 22.5 °C (`2D`) and cool fan speed 3.
+
+| Step | Write | Result |
+|---|---|---|
+| start | power `01` + mode `0200` + `p_02 = 34` (26.0 °C) + `p_09 = 0600` (speed 4) | 2004; on, cool, 26.0, speed 4: exactly those four params changed |
+| after 5 min | the same with `p_02 = 2D` (22.5 °C) + `p_09 = 0500` (speed 3) | 2004; target and fan changed, mode and power kept |
+| after 4 min | power `01` + mode `0000` + `p_28 = 0700` (speed 5) | 2004; on, fan, speed 5 |
+| after 1 min | `p_28 = 0300` (speed 1), then after 1 min `0500` (speed 3) | 2004 each; only `p_28` changed |
+| after 5 min | power `00` | 2004; off, fan, speed 3, cool target back at 22.5 |
+
+- Every combination the codec writes is now confirmed: power + mode + cool target + fan in one request, from off
+  and while running. A changed target or fan applies without a mode change.
+- Room temp 29.5 → 27.5 °C and humidity 85 → 75 % in 9 min of cool; humidity back at 85 % after 5 min of fan.
+- The speed 5 → 1 change was clearly felt at the air outlet, not only seen in the read-back.
+- Restoring the stored target and fan at the end keeps the API state in line with what the remote last sent.
+
 ## Read size and narrower reads (spike S6, 2026-10-16)
 
 Read only (op 2), measured from the Mac; the Pico gets the same bytes.
@@ -117,9 +135,8 @@ Read only (op 2), measured from the Mac; the Pico gets the same bytes.
 It never writes `e_3003` (streamer, mold-proof candidates) or anything outdoor, and refuses heat and auto (only the
 remote sets those). A write counts as done when every response has `rsc 2004`.
 
-Dry mode `0500` and the write response body were confirmed in S2, a fan-speed change with power + mode in S3 (above).
-Still untested on the real unit (the simulator assumes it works like the tested writes):
-- power + mode + cool target + fan in **one** request (S5; power + mode + fan confirmed in S3).
+All of these writes are confirmed on the real unit: dry mode `0500` and the write response body in S2, a fan-speed
+change in S3, power + mode + cool target + fan in one request in S5 (above).
 
 Paths below are relative to `/dsiot/edge/adr_0100.dgc_status/dgc_status/e_1002` (indoor)
 or `/dsiot/edge/adr_0200.dgc_status/dgc_status/e_1003` (outdoor).

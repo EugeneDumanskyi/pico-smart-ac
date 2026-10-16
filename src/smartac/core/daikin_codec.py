@@ -193,8 +193,7 @@ def write_params(state):
     # ACState -> [(group, param, pv)] in e_1002, in write order. Raises ValueError on a state we don't write.
     # Off is power alone (tested: the AC keeps its mode, target and fan). On writes power, mode, the cool target
     # if set, and the mode's fan if set.
-    # Untested on the real unit (docs/DAIKIN_API.md): power + mode + cool target + fan in one request
-    # (S5; S2 confirmed power + dry, S3 power + mode + a fan-speed change).
+    # All of these are confirmed on the real unit (docs/DAIKIN_API.md, spikes S2, S3, S5).
     if not isinstance(state, ACState) or not isinstance(state.power, bool):
         raise ValueError("bad power")
     if not state.power:
