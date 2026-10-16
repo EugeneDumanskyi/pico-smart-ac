@@ -53,6 +53,37 @@ off 18 min, cool 14 min, fan 20 min, off 24 min. No reference thermometer in the
 - Open: off-periods were short (18 and 24 min) on a day with a steady room. An overnight off run on the Pico
   (`tools/pico_log.py`) checks that the temperature keeps following the room for hours.
 
+## Dry mode as a write (spike S2, 2026-10-16)
+
+Written from the Mac with `core/daikin_codec.write_request`, each step read back 5 s later. The AC started off in fan.
+
+| Step | Write | Result |
+|---|---|---|
+| start | power `01` + mode `0500` (dry), no target, no fan | 2004; on, dry, fan auto (`p_27` was already `0A00`) |
+| after 5 min | power `01` + mode `0000` (fan) | 2004; on, fan, fan speed 3 (`p_28` kept) |
+| after 5 min | power `00` | 2004; off, mode stays fan |
+
+- Dry is writable like cool and fan, and power + dry mode work in one request while off.
+- Response body is exactly `{"responses":[{"rsc":2004,"fr":"/dsiot/edge/adr_0100.dgc_status"}]}`, as the codec assumes.
+- Switching on also changed status fields in `e_3003`: `p_01` 00 → 02, `p_37` 00 → 02 (back to 00 at off),
+  `p_2F` 0400 → 0A00, `p_0C` 37 → 3A. None of the mold-proof candidates (`p_1B`, `p_29`, `p_2C`, `p_30`, `p_36`)
+  changed. The dry → fan switch changed only the mode.
+- Run fan for a few minutes after cool or dry before switching off, to dry the coil (the cycle in idea.md).
+
+## Fan-speed change (spike S3, 2026-10-16)
+
+Same method as S2, fan mode only (no compressor). The AC started off in fan, speed 3; one minute per step.
+
+| Step | Write | Result |
+|---|---|---|
+| start | power `01` + mode `0000` | 2004; on, fan, speed 3 |
+| speed 1 | power `01` + mode `0000` + `p_28 = 0300` | 2004; speed 1, only `p_28` changed |
+| speed 3 | power `01` + mode `0000` + `p_28 = 0500` | 2004; speed 3, only `p_28` changed |
+| stop | power `00` | 2004; off, fan, speed 3 |
+
+- A fan-speed change is writable together with power and mode in one request, and is applied while running.
+- `e_3003/p_37` follows power (00 off, 02 on) in fan mode too; `p_2F` did not move in fan mode (it did in dry).
+
 ## Read size and narrower reads (spike S6, 2026-10-16)
 
 Read only (op 2), measured from the Mac; the Pico gets the same bytes.
@@ -86,12 +117,9 @@ Read only (op 2), measured from the Mac; the Pico gets the same bytes.
 It never writes `e_3003` (streamer, mold-proof candidates) or anything outdoor, and refuses heat and auto (only the
 remote sets those). A write counts as done when every response has `rsc 2004`.
 
-Still untested on the real unit (the simulator assumes they work like the tested writes):
-- dry mode `0500` as a write (S2);
-- a real fan-speed **change** (S3; only an unchanged `p_28` was written);
-- power + mode + target + fan in **one** request (S5 confirmed power + mode only);
-- the write response body beyond `rsc`: `{"responses":[{"fr":"/dsiot/edge/adr_0100.dgc_status","rsc":2004}]}` is
-  assumed.
+Dry mode `0500` and the write response body were confirmed in S2, a fan-speed change with power + mode in S3 (above).
+Still untested on the real unit (the simulator assumes it works like the tested writes):
+- power + mode + cool target + fan in **one** request (S5; power + mode + fan confirmed in S3).
 
 Paths below are relative to `/dsiot/edge/adr_0100.dgc_status/dgc_status/e_1002` (indoor)
 or `/dsiot/edge/adr_0200.dgc_status/dgc_status/e_1003` (outdoor).

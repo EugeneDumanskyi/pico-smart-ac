@@ -193,8 +193,8 @@ def write_params(state):
     # ACState -> [(group, param, pv)] in e_1002, in write order. Raises ValueError on a state we don't write.
     # Off is power alone (tested: the AC keeps its mode, target and fan). On writes power, mode, the cool target
     # if set, and the mode's fan if set.
-    # Untested on the real unit (docs/DAIKIN_API.md): dry 0500 (S2), a fan-speed change (S3; only an unchanged
-    # p_28 was written), and power + mode + target + fan in one request (S5 confirmed power + mode only).
+    # Untested on the real unit (docs/DAIKIN_API.md): power + mode + cool target + fan in one request
+    # (S5; S2 confirmed power + dry, S3 power + mode + a fan-speed change).
     if not isinstance(state, ACState) or not isinstance(state.power, bool):
         raise ValueError("bad power")
     if not state.power:
@@ -267,7 +267,7 @@ def parse_write(body):
 
 def write_result(response):
     # Parsed response to write_request -> None if accepted, else why ("rsc 4000", "malformed response").
-    # Only rsc is checked: the rest of the body ({"responses":[{"fr":..., "rsc":2004}]}) is assumed, not tested.
+    # Only rsc is checked; the body is {"responses":[{"rsc":2004,"fr":...}]} on the real unit (S2).
     if not isinstance(response, dict) or not isinstance(response.get("responses"), list) or not response["responses"]:
         return "malformed response"
     for r in response["responses"]:
