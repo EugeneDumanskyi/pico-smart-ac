@@ -177,6 +177,8 @@ Multi-byte numbers are little-endian hex.
 - Mold-proof: probably one of the unnamed 00/01 switches in e_3003
   (p_1B, p_29, p_2C, p_30, p_36). Currently off. Find it by toggling and diffing.
 - e_3003/p_28 = 01: an on/off switch, not streamer, not mold-proof.
+- Dry offset: in dry the remote sets a relative value, 0 to −3.0 in 0.5 steps, not a target temperature.
+  Field not mapped; find it by changing it on the remote while in dry and diffing. The codec never writes it.
 
 ## IR remote caveat
 

@@ -27,9 +27,9 @@ the contract; the same logic runs on the Mac against a simulator ([ADR 0002](dec
 |---|---|
 | Read room temp (whole °C), humidity (%), outdoor temp (0.5 °C) | confirmed |
 | Power on/off, mode (cool/fan/dry/heat/auto), cool target temp | confirmed (written + read back) |
-| Fan speed | written with same value; real change not yet tested |
-| Dry mode `0500` | from pydaikin, not yet tested |
-| Streamer | readable, **not** writable (rsc 4000) |
+| Fan speed | confirmed (S3, S5: changed while running, felt at the outlet) |
+| Dry mode `0500` | confirmed (S2); no target temperature, see below |
+| Streamer | readable, **not** writable (rsc 4000); stays as the remote set it across API writes (S4) |
 | Mold-proof | unmapped |
 | Room readings while the unit is off | update (S1, 2026-10-16): temp 0.5 °C steps, humidity 5 % steps; overnight run open |
 
@@ -229,7 +229,8 @@ broken file falls back to them (and the web page shows a warning).
 - `sensor`: `temp`, `hum`, `outdoor_temp` (later: `dew_point`, external sensor values).
 - `op`: `>`, `>=`, `<`, `<=`. `match`: `all` (AND) or `any` (OR).
 - `mode`: `cool`, `dry`, `fan` (`heat`, `auto` allowed by the AC but not offered in the UI).
-- `fan`: `auto`, `quiet`, `1`..`5`. `target_c`: only for `cool`, in 0.5 °C steps.
+- `fan`: `auto`, `quiet`, `1`..`5`. `target_c`: only for `cool`, in 0.5 °C steps. Dry has no target temperature:
+  the unit takes a relative offset (0 to −3.0 in 0.5 steps, set on the remote), which v1 leaves as the remote set it.
 - `min_interval_min`: minimum time between cycle starts of this rule (e.g. 240 for away).
 
 ### `settings.json`
@@ -384,7 +385,9 @@ Scheduled releases for these are in [roadmap.md](roadmap.md#after-v10).
 - **Fan phase vs. humidity**: drying the coil with the fan blows the condensed water back into the room.
   Log humidity during the fan phase; if it jumps, make the fan phase shorter or slower.
 - Thresholds: is 26 °C a comfortable "done" temperature? Is 27 right for night?
-- Does dry mode accept a target temperature on this unit? (spike S2)
+- Dry mode on this unit takes no target temperature, only a relative offset from 0 to −3.0 °C in 0.5 steps (more
+  negative cools more; the owner uses −1.0). The API field is not mapped yet: change it on the remote and diff.
+  v1 does not write it, so the AC keeps the remote's value.
 - Do room readings update while the unit is off, and how much do they jump at start/stop? (spike S1) If not,
   the external sensor moves into v1.0.
 - Power use: the API has daily/weekly usage history (units not yet decoded).
