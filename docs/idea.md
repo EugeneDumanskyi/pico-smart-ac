@@ -31,7 +31,7 @@ the contract; the same logic runs on the Mac against a simulator ([ADR 0002](dec
 | Dry mode `0500` | from pydaikin, not yet tested |
 | Streamer | readable, **not** writable (rsc 4000) |
 | Mold-proof | unmapped |
-| Room readings while the unit is off | not tested; may be stale (spike S1) |
+| Room readings while the unit is off | update (S1, 2026-10-16): temp 0.5 °C steps, humidity 5 % steps; overnight run open |
 
 Facts that shape the design:
 - **Sensor is the AC's own**, near the ceiling, in whole degrees. "> 29" really means "≥ 30".

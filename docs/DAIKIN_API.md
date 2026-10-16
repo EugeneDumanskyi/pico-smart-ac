@@ -3,7 +3,7 @@
 Unit tested: room AC (type `RA`), Wi-Fi adapter fw 3.6.0.
 No auth. Endpoint: `POST http://<ac-ip>/dsiot/multireq`, JSON body.
 
-Read:  `{"requests":[{"op":2,"to":"/dsiot/edge/adr_0100.dgc_status?filter=pv,pt,md"}]}`
+Read:  `{"requests":[{"op":2,"to":"/dsiot/edge/adr_0100.dgc_status?filter=pv"}]}` (the codec reads both units this way)
 Write: `op: 3` on the same endpoint. Response `rsc 2004` = accepted, `rsc 4000` = rejected.
 ```
 {"requests":[{"op":3,"to":"/dsiot/edge/adr_0100.dgc_status",
@@ -27,6 +27,52 @@ Full cycle from the Pico 2 W (MicroPython v1.29.0, blocking `requests`), 2026-10
   already shows the new state. Target temp, fan speeds and streamer were not written and stayed unchanged.
 - Room readings (1-min reads): cool 10 min took 29 °C / 80 % to 27 °C / 70 %. Temperature is whole degrees
   and moves slowly; humidity reacts faster and rose back to 75–80 % in fan mode and after off (coil drying).
+
+## Readings while off (spike S1, 2026-10-16)
+
+Read only, from the Mac (`tools/daikin_log.py`), every 10 s and every 60 s. The unit was switched with the remote:
+off 18 min, cool 14 min, fan 20 min, off 24 min. No reference thermometer in the room.
+
+| Phase | Room temp (`p_05` / 2) | Room humidity | Outdoor |
+|---|---|---|---|
+| off, 18 min | 29.0 flat | flickers 80 ↔ 85 (6 changes) | 29.0 flat |
+| cool, 14 min | first step after 80 s, then ~0.25 °C/min: 29.0 → 26.0 | 85 → 75, last 5 min at 75 | 29.0 → 33.5 |
+| fan, 20 min | 26.0 → 27.0 (one dip to 25.5) | 75 → 80 within 10 s, 85 after 6 min | 33.5, then 29.5 from 13 min |
+| off, 24 min | 27.0 → 27.5 after 7 min → 28.0 after 17 min | 85 flat | 29.5 flat |
+
+- **Readings do update while the unit is off.** After the stop the room temperature kept climbing back towards the
+  pre-cool value, and humidity moves while off. There is **no step** at start or stop: start shows the first change
+  after 80 s, stop shows none at all. The start/stop jump the design worried about is below the 0.5 °C resolution.
+- `e_A00B/p_05` (and `p_06`, identical so far) is room temperature × 2, little-endian: **0.5 °C resolution**.
+  `p_01` is `floor(p_05 / 2)`, so `p_01` lags by up to 0.9 °C. They are not drifting counters.
+- Humidity has **5 % steps** and flickers between neighbouring steps while the room is steady (6 times in 18 min).
+  Rules on humidity need ≥ 5 % hysteresis or a time filter. 85 % was the highest value seen; it may be a ceiling.
+- The fan phase after cool brings humidity straight back (75 → 85 % in 6 min): the coil drying effect from idea.md.
+- Outdoor temperature is measured at the outdoor unit: it reads 4.5 °C high while the compressor runs and settles
+  ~13 min after it stops. While off it barely moved (0.5 °C in 42 min), so it may refresh slowly when idle.
+- Open: off-periods were short (18 and 24 min) on a day with a steady room. An overnight off run on the Pico
+  (`tools/pico_log.py`) checks that the temperature keeps following the room for hours.
+
+## Read size and narrower reads (spike S6, 2026-10-16)
+
+Read only (op 2), measured from the Mac; the Pico gets the same bytes.
+
+| Request | Bytes | Note |
+|---|---|---|
+| indoor `adr_0100.dgc_status` | 9 685 | same with `?filter=pv,pt,md` (that filter keeps everything) |
+| indoor `?filter=pv` | 4 692 | drops the `md` metadata, keeps `pn`, `pt`, `pv`: all 114 values identical to the full read |
+| outdoor `adr_0200.dgc_status` | 4 734 | `?filter=pv`: 2 390 |
+| indoor + outdoor in one request | 14 404 | both `?filter=pv`: **7 067** |
+| `adr_0100.i_power.week_power` | 324 | runtime counters |
+
+- Sub-node paths are not supported: `…dgc_status/dgc_status/e_1002[/e_A00B[/p_01]]`, the outdoor
+  `…/e_1003/e_A00D` and a dotted form all return `rsc 4041` (not found) with no `pc`. The smallest read of a
+  sensor is the whole unit with `?filter=pv`.
+- Other filters: `filter=pn` = full size, `filter=md` = 8 178 indoor; `filter=pv,pn` = `filter=pv`.
+- Reply time ~0.2–0.4 s from the Mac; from the Pico 0.5–0.6 s for the full indoor read, one outlier 3.9 s.
+- On the Pico, parsing the full indoor reply holds ~53 KB of heap (firmware.md). `?filter=pv` should halve that.
+- `dgc_status` also has `last_ope` (`type`, `time`, `chg_flg`); `time` reads as local time with a `Z` suffix.
+  Meaning of `type` not known yet (99 seen while the unit was off).
 
 ## Write format used by the codec
 
@@ -58,7 +104,8 @@ Multi-byte numbers are little-endian hex.
 | Power | e_1002/e_A002/p_01 | 00 off, 01 on | pydaikin + observed |
 | Mode | e_1002/e_3001/p_01 | 0000 fan, 0100 heat, 0200 cool, 0300 auto, 0500 dry | pydaikin, daikin-ts |
 | Fan speed | e_1002/e_3001/p_09 cool, p_0A heat, p_26 auto, p_27 dry, p_28 fan | 0A00 auto, 0B00 quiet, 0300..0700 = 1..5 | pydaikin, daikin-ts |
-| Room temp | e_1002/e_A00B/p_01 | int °C | observed |
+| Room temp | e_1002/e_A00B/p_01 | int °C, = floor(p_05 / 2) | observed |
+| Room temp, 0.5 °C | e_1002/e_A00B/p_05 (p_06 same so far) | int16 / 2 °C | S1 2026-10-16 |
 | Room humidity | e_1002/e_A00B/p_02 | int % | observed |
 | Outdoor temp | e_1003/e_A00D/p_01 | int16 / 2 °C | pydaikin |
 | Target temp | e_1002/e_3001/p_02 cool, p_03 heat, p_1D auto | value / 2 °C | pydaikin |
@@ -88,4 +135,4 @@ Automation must detect this as a manual override (see docs/idea.md).
 ## How to map a new field
 
 Snapshot `dgc_status` for adr_0100 and adr_0200, change one setting on the remote, snapshot again, diff.
-Ignore drifting sensors/counters (e_A00B/p_05-06, e_2015, e_2028, e_2029, e_A006).
+Ignore drifting sensors/counters (e_A00B, e_A00D, e_2015, e_2028, e_2029, e_A006).
