@@ -102,6 +102,13 @@ Same method. The AC started off in fan, speed 3, with a stored cool target of 22
 - The speed 5 → 1 change was clearly felt at the air outlet, not only seen in the read-back.
 - Restoring the stored target and fan at the end keeps the API state in line with what the remote last sent.
 
+## Streamer across API writes (spike S4, 2026-10-16)
+
+No extra writes: the streamer was on (set with the remote, `e_3003/p_20 = 01`) through S2, S3 and S5, and every
+write there was diffed against a full read. `p_20` never changed across 3 off → on and 3 on → off switches and the
+mode changes cool ↔ fan ↔ dry, and still read `01` afterwards. The streamer stays as the remote set it; the codec
+never writes it (a direct write is refused, see the top of this file).
+
 ## Read size and narrower reads (spike S6, 2026-10-16)
 
 Read only (op 2), measured from the Mac; the Pico gets the same bytes.
