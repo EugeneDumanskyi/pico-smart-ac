@@ -194,7 +194,14 @@ class FakeDaikin:
 
     def _indoor(self):
         s = self.room.sensors()
-        sensors = {"p_01": codec.le_hex(min(max(s["temp"], -128), 127), 1), "p_02": codec.le_hex(s["hum"], 1)}
+        half = min(max(s["temp_half"], -256), 255)
+        # Like the real unit: p_01 whole degrees rounded down, p_05 and p_06 half degrees (spike S1).
+        sensors = {
+            "p_01": codec.le_hex(half // 2, 1),
+            "p_02": codec.le_hex(s["hum"], 1),
+            "p_05": codec.le_hex(half, 2),
+            "p_06": codec.le_hex(half, 2),
+        }
         return {
             "pn": "e_1002",
             "pt": 1,

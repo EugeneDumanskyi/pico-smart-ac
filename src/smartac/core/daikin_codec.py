@@ -22,8 +22,9 @@ INDOOR = "/dsiot/edge/adr_0100.dgc_status"
 OUTDOOR = "/dsiot/edge/adr_0200.dgc_status"
 READ_REQUEST = {
     "requests": [
-        {"op": 2, "to": INDOOR + "?filter=pv,pt,md"},
-        {"op": 2, "to": OUTDOOR + "?filter=pv,pt,md"},
+        # pv drops the md metadata and halves the reply; every value is kept (spike S6).
+        {"op": 2, "to": INDOOR + "?filter=pv"},
+        {"op": 2, "to": OUTDOOR + "?filter=pv"},
     ]
 }
 
@@ -171,8 +172,15 @@ def decode(response, limits=None):
     t_lim = lim.get(SENSOR_TEMP, DEFAULT_LIMITS[SENSOR_TEMP])
     h_lim = lim.get(SENSOR_HUM, DEFAULT_LIMITS[SENSOR_HUM])
 
-    temp = _int(indoor, ("e_A00B", "p_01"), signed=True)
-    temp = _in_range(None if temp is None else temp * 10, (tenths(t_lim[0]), tenths(t_lim[1])))
+    # p_05 is the room temp in half degrees; p_01 is the same rounded down to whole degrees (spike S1).
+    # p_01 is the fallback if p_05 is missing or unreadable.
+    temp = _int(indoor, ("e_A00B", "p_05"), signed=True)
+    if temp is not None:
+        temp *= 5
+    else:
+        temp = _int(indoor, ("e_A00B", "p_01"), signed=True)
+        temp = None if temp is None else temp * 10
+    temp = _in_range(temp, (tenths(t_lim[0]), tenths(t_lim[1])))
     hum = _in_range(_int(indoor, ("e_A00B", "p_02")), h_lim)
     out = None
     if outdoor is not None:

@@ -63,7 +63,7 @@ class TestReads(unittest.TestCase):
         dev = FakeDaikin(clock)
         dev.set_room(temp=24)
         clock.advance_min(60)
-        self.assertEqual(read(dev).temp, 280)  # drifts towards outdoor 32 C
+        self.assertEqual(read(dev).temp, 275)  # drifts towards outdoor 32 C
 
     def test_negative_outdoor(self):
         dev = FakeDaikin(FakeClock())

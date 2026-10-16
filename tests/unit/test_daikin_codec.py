@@ -16,7 +16,16 @@ def node(pn, *children):
     return {"pn": pn, "pt": 1, "pch": list(children)}
 
 
-def indoor_root(power="00", mode="0000", e3001=None, room_t="1D", room_h="50"):
+def indoor_root(power="00", mode="0000", e3001=None, room_t="1D", room_h="50", room_t2=None):
+    # room_t2 is p_05 (half degrees); by default room_t x 2, or left out if room_t isn't valid hex.
+    if room_t2 is None:
+        try:
+            room_t2 = codec.le_hex(codec.le_int(room_t, signed=True) * 2, 2)
+        except ValueError:
+            pass
+    sensors = [leaf("p_01", room_t), leaf("p_02", room_h)]
+    if room_t2 is not None:
+        sensors += [leaf("p_05", room_t2), leaf("p_06", room_t2)]
     params = [leaf("p_01", mode)]
     for pn, pv in (e3001 or {}).items():
         params.append(leaf(pn, pv))
@@ -25,7 +34,7 @@ def indoor_root(power="00", mode="0000", e3001=None, room_t="1D", room_h="50"):
         node("e_A002", leaf("p_01", power)),
         node("e_3001", *params),
         node("e_3003", leaf("p_20", "00"), leaf("p_28", "01")),
-        node("e_A00B", leaf("p_01", room_t), leaf("p_02", room_h), leaf("p_05", "1234")),
+        node("e_A00B", *sensors),
     )
 
 
@@ -66,7 +75,7 @@ class TestLeInt(unittest.TestCase):
 class TestReadRequest(unittest.TestCase):
     def test_reads_indoor_and_outdoor(self):
         tos = [r["to"] for r in codec.READ_REQUEST["requests"]]
-        self.assertEqual(tos, [codec.INDOOR + "?filter=pv,pt,md", codec.OUTDOOR + "?filter=pv,pt,md"])
+        self.assertEqual(tos, [codec.INDOOR + "?filter=pv", codec.OUTDOOR + "?filter=pv"])
         self.assertTrue(all(r["op"] == 2 for r in codec.READ_REQUEST["requests"]))
 
 
@@ -163,8 +172,8 @@ class TestDecodeUnreachable(unittest.TestCase):
 
 
 class TestRangeChecks(unittest.TestCase):
-    def decode_room(self, room_t="1D", room_h="50", limits=None):
-        return codec.decode(response(indoor_root(room_t=room_t, room_h=room_h)), limits)
+    def decode_room(self, room_t="1D", room_h="50", limits=None, room_t2=None):
+        return codec.decode(response(indoor_root(room_t=room_t, room_h=room_h, room_t2=room_t2)), limits)
 
     def test_default_limits_inclusive(self):
         r = self.decode_room("0A", "05")  # 10 °C, 5 %
@@ -185,6 +194,19 @@ class TestRangeChecks(unittest.TestCase):
         r = self.decode_room("ZZ", "")
         self.assertTrue(r.reachable)
         self.assertEqual((r.temp, r.hum), (None, None))
+
+    def test_half_degrees_from_p_05(self):
+        r = self.decode_room("1B", room_t2="3700")  # p_01 27 °C, p_05 27.5 °C
+        self.assertEqual(r.temp, 275)
+        r = self.decode_room("1D", room_t2="0000")  # p_05 wins when both are readable
+        self.assertIsNone(r.temp)  # 0 °C is out of range: no fallback to p_01
+
+    def test_p_01_fallback(self):
+        root = indoor_root(room_t="1B")
+        sensors = root["pch"][3]
+        sensors["pch"] = [c for c in sensors["pch"] if c["pn"] not in ("p_05", "p_06")]
+        self.assertEqual(codec.decode(response(root)).temp, 270)
+        self.assertEqual(self.decode_room("1B", room_t2="ZZ").temp, 270)
 
     def test_custom_limits_from_settings(self):
         limits = {"temp": [15, 35], "hum": [20, 90]}

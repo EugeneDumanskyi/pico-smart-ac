@@ -80,9 +80,9 @@ class Room:
         self.hum = min(max(self.hum + d_hum * dt, 0.0), 100.0)
 
     def sensors(self):
-        # What the AC reports: whole C, whole % (0-100), outdoor in half degrees.
+        # What the AC reports: room and outdoor temp in half degrees, whole % (0-100).
         return {
-            "temp": _round(self.temp),
+            "temp_half": _round(self.temp * 2),
             "hum": min(max(_round(self.hum), 0), 100),
             "outdoor_half": _round(self.outdoor * 2),
         }

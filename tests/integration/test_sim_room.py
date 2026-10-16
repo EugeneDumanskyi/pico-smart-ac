@@ -19,13 +19,13 @@ def run(room, ac, minutes):
 
 class TestRoom(unittest.TestCase):
     def test_start_values(self):
-        self.assertEqual(Room().sensors(), {"temp": 29, "hum": 80, "outdoor_half": 64})
+        self.assertEqual(Room().sensors(), {"temp_half": 58, "hum": 80, "outdoor_half": 64})
         self.assertEqual(Room({"temp": 25, "outdoor": -3.2}).sensors()["outdoor_half"], -6)
         self.assertEqual(ROOM_DEFAULTS["temp"], 29.0)  # overriding didn't touch the defaults
 
     def test_cool_ten_minutes_matches_real_run(self):
         r = run(Room(), COOL, 10)
-        self.assertEqual(r.sensors()["temp"], 27)
+        self.assertEqual(r.sensors()["temp_half"], 54)
         self.assertTrue(68 <= r.sensors()["hum"] <= 71, r.hum)
 
     def test_cool_stops_near_target(self):
@@ -78,11 +78,11 @@ class TestRoom(unittest.TestCase):
     def test_rounding_and_clamps(self):
         r = Room()
         r.set(temp=26.5, hum=104.0)
-        self.assertEqual(r.sensors()["temp"], 27)
+        self.assertEqual(r.sensors()["temp_half"], 53)
         self.assertEqual(r.sensors()["hum"], 100)
-        r.set(temp=26.49, hum=-1)
-        self.assertEqual((r.sensors()["temp"], r.sensors()["hum"]), (26, 0))
+        r.set(temp=26.24, hum=-1)
+        self.assertEqual((r.sensors()["temp_half"], r.sensors()["hum"]), (52, 0))
         r.set(temp=-2.5)
-        self.assertEqual(r.sensors()["temp"], -2)
+        self.assertEqual(r.sensors()["temp_half"], -5)
         r = run(Room({"hum": 2.0, "hum_ambient": 0.0}), COOL, 10)
         self.assertEqual(r.hum, 0.0)
