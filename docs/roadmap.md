@@ -74,7 +74,7 @@ First tasks, in order:
 | Scope | `board/pico.py`, `shell/net.py` (Wi-Fi supervisor), watchdog task, crash log, `core/daikin_codec.py` (read), `shell/daikin.py`, `core/history.py`, Microdot with `GET /api/state`, `/api/history`, a bare HTML status page. |
 | Out of scope | Writes to the AC, rules, config files, auth. |
 | Deliverables | Deployable app (`tools/deploy.py`, `.mpy` build); device test scripts. |
-| Done when | 72 h soak: no unrecovered hang; heap free and largest block flat; Wi-Fi drops (router reboot) recovered; reconnect and reset counters visible in `/api/state`. |
+| Done when | Day soak (12–14 h with `tools/soak_log.py`): no unexplained reset; heap free and largest block flat after the first hour; reconnect and reset counters visible in `/api/state`. |
 | Dependencies | M0 (S6, S7). |
 | Risks | Wi-Fi driver silence after hours; fragmentation from large responses. |
 | Needs | Pico; real AC read only. |
@@ -84,7 +84,9 @@ and a tick only reads the AC and records history, so the write path can't be rea
 `dry_run`. Done so far (2026-10-17): step 0 device checks ([firmware.md](firmware.md#tested-on-the-device)),
 `core/history.py`, `FileStore`, `board/pico.py`, `shell/net.py`, `shell/api.py`, `shell/tasks.py`, the status page,
 `tools/deploy.py` and `tools/soak_log.py`; deployed, with the watchdog and crash checks passed on the device.
-Open: the Wi-Fi drop test (router restart) and the 72 h soak.
+Open: the day soak. Moved on 2026-10-17, as the owner can't keep a computer running for 3 days: the multi-day soak
+goes to M3, which runs a week anyway and is recorded on the Pico itself (an hourly `heap` line in `events.log`);
+the Wi-Fi drop test (router restart) goes to M4's safety checklist, where the owner is present.
 
 ## M2: Core logic on the host
 
@@ -107,7 +109,7 @@ Open: the Wi-Fi drop test (router restart) and the 72 h soak.
 | Scope | M2 core on the Pico, `profiles.json`/`settings.json` from flash (edited by file copy), `dry_run`: commands become events (`would start "humid"`). |
 | Out of scope | Writes to the AC, editor UI. |
 | Deliverables | Shadow event log; a short tuning note in `idea.md` (thresholds, confirm reads). |
-| Done when | 7 nights of normal use in shadow mode; every "would" decision reviewed against the history and judged sensible; remote use correctly seen as "human". |
+| Done when | 7 nights of normal use in shadow mode; every "would" decision reviewed against the history and judged sensible; remote use correctly seen as "human". Doubles as the long soak (moved from M1): no unexplained reset, and the hourly `heap` lines in `events.log` flat over the week. |
 | Dependencies | M1, M2. |
 | Risks | Readings while off (S1) make triggers useless → external sensor moves into v1.0. |
 | Needs | Pico; real AC read only. |
@@ -119,7 +121,7 @@ Open: the Wi-Fi drop test (router restart) and the 72 h soak.
 | Goal | Automation controls the real AC safely. |
 | Scope | Write path in the client (the codec's write side is done in M2 and tested against the simulator only), read-back, `MANUAL`, `TAKEOVER`, `STOPPING`, boot recovery. First from the Mac (Unix port, short timers), then on the Pico. |
 | Out of scope | UI actions (M5). |
-| Deliverables | Safety checklist with results: remote press in each phase; Daikin app change; AC on at boot → hold → takeover; Pico switched off mid-cycle and back on (AC untouched → finished; AC changed → hold); Wi-Fi off mid-cycle; AC unreachable at the end of a phase; hard cap hit; config saved mid-cycle. |
+| Deliverables | Safety checklist with results: remote press in each phase; Daikin app change; AC on at boot → hold → takeover; Pico switched off mid-cycle and back on (AC untouched → finished; AC changed → hold); Wi-Fi off mid-cycle; router restart while idle (moved from M1: reconnect without a reset under 15 min; a new AC IP → one reset, then "unreachable", no loop); AC unreachable at the end of a phase; hard cap hit; config saved mid-cycle. |
 | Done when | Every checklist case passes on the real AC, and the AC ends in the expected state each time. |
 | Dependencies | M3. |
 | Risks | Rejected writes misread as overrides; two controllers running at once during testing. |

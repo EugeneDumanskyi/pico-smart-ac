@@ -7,7 +7,7 @@ import io
 import sys
 
 from smartac.board.base import CRASH
-from smartac.core.types import EV_LOW_MEMORY, ticks_since
+from smartac.core.types import EV_HEAP, EV_LOW_MEMORY, ticks_since
 from smartac.shell import api
 from smartac.shell.net import NetSupervisor
 
@@ -15,6 +15,7 @@ WDT_MS = 8000
 WATCHDOG_PERIOD_MS = 1000
 NET_STALE_MS = 30 * 1000
 HOUSEKEEPING_MS = 60 * 1000
+HEAP_LOG_EVERY = 60  # housekeeping runs: one heap line an hour in events.log, a soak record without a Mac
 LOW_FREE = 64 * 1024
 LOW_BLOCK = 24 * 1024  # a 16 KB AC reply plus its parse must still fit
 
@@ -30,10 +31,12 @@ async def watchdog(board, app, net):
 
 
 async def housekeeping(board, app):
-    # Heap stats for /api/state (the soak watches them), a low_memory event when a threshold is crossed.
+    # Heap stats for /api/state (the soak watches them), a low_memory event when a threshold is crossed, and an
+    # hourly heap line in events.log, so a long soak's trend survives on the Pico.
     st = app.stats
     st["low_memory"] = 0
     low = False
+    runs = 0
     while True:
         gc.collect()
         free, block = board.heap()
@@ -47,6 +50,9 @@ async def housekeeping(board, app):
             st["low_memory"] += 1
             app.event(EV_LOW_MEMORY, "free %d, largest block %s" % (free, block))
         low = now_low
+        runs += 1
+        if runs % HEAP_LOG_EVERY == 0:
+            app.log(EV_HEAP, "free %d block %s" % (free, block))
         app.events.prune(board.ticks_ms())
         await board.sleep_ms(HOUSEKEEPING_MS)
 

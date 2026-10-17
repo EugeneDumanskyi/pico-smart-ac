@@ -82,7 +82,7 @@ M1 app on the device, 2026-10-17, deployed with `tools/deploy.py` (all `.mpy`, 2
 | `tests/device/crash_check.py` | PASS: the traceback is in `crash.txt`, the next boot's cause is `crash`, `last_crash` is the exception line |
 | `tests/device/wdt_check.py` | PASS: control heartbeat stalled, reset ~17 s later (10 s to go stale + 8 s watchdog), next boot's cause `watchdog` |
 | Wi-Fi drop (router restart) | not done yet |
-| 72 h soak (`tools/soak_log.py`) | not done yet |
+| Day soak (`tools/soak_log.py`, 12–14 h) | not done yet; the long soak runs in M3 (hourly `heap` lines in `events.log`) |
 
 ## Flashing
 

@@ -59,7 +59,9 @@ Deploy options (`python3 tools/deploy.py ...`):
 **Maintenance mode** is the file `/maint` on the Pico: at boot, `main.py` sees it and returns to the REPL before the
 app and its watchdog start, so files can be copied and device tests run (`mpremote run tests/device/<script>.py`).
 
-**Soak log**: `python3 tools/soak_log.py <pico-ip>` writes `/api/state` once a minute to a CSV in `local/`.
+**Soak log**: `python3 tools/soak_log.py <pico-ip>` writes `/api/state` once a minute to a CSV in `local/`. The Pico
+also writes its free heap and largest block to `events.log` once an hour (over 8 days kept), so a long soak needs no
+computer: afterwards `tools/deploy.py --backup` copies the log off.
 
 ## Development
 

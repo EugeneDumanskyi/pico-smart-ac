@@ -8,8 +8,8 @@
 import json
 import os
 
-MAX_EVENT_LINES = 400  # about what the 2 x 8 KB rotating log holds
-EVENT_LOG_BYTES = 8 * 1024
+MAX_EVENT_LINES = 800  # about what the 2 x 16 KB rotating log holds
+EVENT_LOG_BYTES = 16 * 1024  # at least 16 KB kept: over 8 days of hourly heap lines (shell/tasks.py)
 MAX_CRASH = 2048
 
 

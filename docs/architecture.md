@@ -52,7 +52,7 @@ Logging: user-facing **events** (ring in RAM, cycle summaries and config saves a
 | `net` | 5 s | check link, reconnect with backoff, reset if offline too long | call anything that resolves names (DNS blocks the loop) |
 | `http` | on request | Microdot; read snapshot, queue actions, save config through `store` | call the AC, hold big strings (stream large responses) |
 | `watchdog` | 1 s | feed the hardware WDT **only if** `control` beat within `2 × poll_s` and `net` beat within 30 s | feed unconditionally |
-| `housekeeping` | 60 s | `gc.collect()`, heap stats (free, largest block, minimums), `low_memory` event, prune the event ring | allocate |
+| `housekeeping` | 60 s | `gc.collect()`, heap stats (free, largest block, minimums), `low_memory` event, an hourly `heap` line in `events.log` (not the RAM ring), prune the event ring | allocate |
 
 Rules for code in this loop: no blocking call (no `requests`, no `time.sleep`), no `await` inside a
 read-modify-write of shared state, no `_thread` / second core.
@@ -82,7 +82,7 @@ didn't set → `MANUAL`; while a write is pending, the unchanged previous state 
 |---|---|---|
 | `profiles.json`, `settings.json` (+ `.bak`) | user saves | ~0 |
 | `state.json` (cycle owner, expected AC state, pause, boot counter) | state transitions only | ≤ 50 |
-| `events.log` (rotating, 2 × 8 KB; boot counter + uptime, no timestamps) | cycle end, config save, override, takeover, failed write, reboot | ≤ 50 |
+| `events.log` (rotating, 2 × 16 KB; boot counter + uptime, no timestamps) | cycle end, config save, override, takeover, failed write, reboot; an hourly `heap` line | ≤ 75 |
 | `crash.txt` (the last traceback) | after an uncaught exception | ~0 |
 | `boot.json`, `resets.json` (+ `.bak`) | once per boot: boot counter, resets by cause | a few |
 | `reset_reason.txt` | just before a deliberate reset; read and removed at the next boot | ~0 |
@@ -93,7 +93,7 @@ so ~100 small writes/day is negligible for the 2.5 MB file system.
 
 `FileStore` saves `name.json` by writing `name.json.tmp`, moving the old file to `name.json.bak`, then the `.tmp` into
 place (littlefs `rename` replaces the target; checked on the device). A power cut leaves one of them whole, and `load`
-falls back to the `.bak`. `events.log` moves to `events.1.log` when the next line would pass 8 KB.
+falls back to the `.bak`. `events.log` moves to `events.1.log` when the next line would pass 16 KB.
 
 **Reset causes.** On the RP2350 `machine.reset()` reports `WDT_RESET`, the same as a real watchdog reset. So every
 deliberate reset (`wifi_down`, `ac_silent`, `crash`, `deploy`) first writes its reason to `reset_reason.txt`; the next
@@ -142,7 +142,7 @@ The repo holds code and templates only. Every personal value lives on the owner'
 | Reboot mid-cycle (crash or owner) | `state.json` says we own a cycle | read AC: if it still matches what we set → finish at once (fan phase, then off); else `MANUAL` |
 | Pico switched off mid-cycle | none possible | by design: the AC stays under remote control until the Pico is back (ADR 0003) |
 | Broken or missing config file | parse or validation error at boot | use `.bak`, else built-in defaults; warning in `/api/state` |
-| Low memory | free heap < 64 KB or largest block < 24 KB (largest block from `micropython.mem_info()`) | `low_memory` event and counter; the soak watches the trend (no reset yet) |
+| Low memory | free heap < 64 KB or largest block < 24 KB (largest block from `micropython.mem_info()`) | `low_memory` event and counter; the soak watches the trend in the hourly `heap` lines (no reset yet) |
 
 ## Where code runs
 

@@ -12,7 +12,7 @@ from smartac.board.host import HostBoard
 from smartac.core import config
 from smartac.core import types as t
 from smartac.shell.app import MAX_ACTIONS, SETTLE_MS, App
-from smartac.shell.store import MemoryStore
+from smartac.shell.store import MAX_EVENT_LINES, MemoryStore
 
 HOST = "127.0.0.1"
 DRY = t.ACState(True, t.MODE_DRY, None, t.FAN_AUTO)
@@ -179,9 +179,9 @@ class TestStore(unittest.TestCase):
         self.assertEqual(store.next_boot(), 1)
         store.save("state", {"a": [1, None]})
         self.assertEqual(store.docs["state"], '{"a": [1, null]}')
-        for i in range(500):
+        for i in range(MAX_EVENT_LINES + 100):
             store.append_event(str(i))
-        self.assertEqual((len(store.events), store.events[-1]), (400, "499"))
+        self.assertEqual((len(store.events), store.events[-1]), (MAX_EVENT_LINES, str(MAX_EVENT_LINES + 99)))
 
     def test_boot_event_reaches_the_log(self):
         w = World()

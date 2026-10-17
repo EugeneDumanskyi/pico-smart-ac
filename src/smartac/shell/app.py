@@ -7,7 +7,7 @@ import asyncio
 
 from smartac.core import config
 from smartac.core.controller import Controller
-from smartac.core.events import EventLog
+from smartac.core.events import EventLog, to_line
 from smartac.core.history import History
 from smartac.core.types import CMD_EVENT, CMD_PERSIST, CMD_WRITE, EV_BOOT, OBSERVE, Reading, ticks_since
 from smartac.shell.daikin import DaikinClient
@@ -156,6 +156,11 @@ class App:
     def event(self, kind, msg):
         # An event from another task (housekeeping).
         self._event(self._now(), kind, msg)
+
+    def log(self, kind, msg):
+        # To events.log only, not the RAM ring: the hourly heap line (housekeeping) would crowd real events out of it.
+        self._now()
+        self.store.append_event(to_line(self.events.boot, self.uptime_ms, kind, msg))
 
     def _settings(self):
         return self.settings if self.controller is None else self.controller.settings

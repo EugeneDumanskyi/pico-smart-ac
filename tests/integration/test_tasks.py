@@ -75,6 +75,23 @@ class TestHousekeeping(unittest.TestCase):
         kinds = [r["kind"] for r in app.events.export(board.ticks_ms())]
         self.assertEqual(kinds.count(t.EV_LOW_MEMORY), 2)
 
+    def test_hourly_heap_line_in_the_flash_log_only(self):
+        clock = FakeClock()
+        sched = Scheduler(clock)
+        board = HostBoard(clock=clock, sleep=sched.sleep)
+        store = MemoryStore()
+        app = App(board, store, observe=True)
+        board.heap = lambda: (300000, 150000)
+        before = len(store.events)
+        virtual(lambda: tasks.housekeeping(board, app), 2 * 60 * 60 * S + 1, sched)
+        lines = [json.loads(x) for x in store.events[before:]]
+        self.assertEqual([(d["kind"], d["up_s"], d["msg"]) for d in lines],
+                         [(t.EV_HEAP, 59 * 60, "free 300000 block 150000"),
+                          (t.EV_HEAP, 119 * 60, "free 300000 block 150000")])
+        # Not in the RAM ring, so a week of them doesn't push real events out.
+        kinds = [r["kind"] for r in app.events.export(board.ticks_ms())]
+        self.assertFalse(t.EV_HEAP in kinds)
+
 
 class TestCrash(unittest.TestCase):
     def setUp(self):
