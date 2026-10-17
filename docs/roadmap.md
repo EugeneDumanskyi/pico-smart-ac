@@ -79,6 +79,13 @@ First tasks, in order:
 | Risks | Wi-Fi driver silence after hours; fragmentation from large responses. |
 | Needs | Pico; real AC read only. |
 
+M2 finished first, so M1 puts the whole app on the Pico in **observe mode**: `App(observe=True)` builds no controller,
+and a tick only reads the AC and records history, so the write path can't be reached. M3 turns the controller on with
+`dry_run`. Done so far (2026-10-17): step 0 device checks ([firmware.md](firmware.md#tested-on-the-device)),
+`core/history.py`, `FileStore`, `board/pico.py`, `shell/net.py`, `shell/api.py`, `shell/tasks.py`, the status page,
+`tools/deploy.py` and `tools/soak_log.py`; deployed, with the watchdog and crash checks passed on the device.
+Open: the Wi-Fi drop test (router restart) and the 72 h soak.
+
 ## M2: Core logic on the host
 
 | | |

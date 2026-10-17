@@ -26,10 +26,11 @@ the plan is in [roadmap.md](roadmap.md). Decisions: [decisions/](decisions/).
 | `core/history.py` | core | 1440 × 1-min ring buffer in preallocated `array`s; streamed JSON export |
 | `core/events.py` | core | event ring (200), marks which events go to flash and owns the `events.log` line format |
 | `shell/daikin.py` | shell | async HTTP POST to `/dsiot/multireq`, hard timeout, one request at a time, IPv4 literal only (no DNS); never raises |
-| `shell/store.py` | shell | `MemoryStore` (documents kept as JSON text) for the host for now; later atomic JSON files (`.tmp` → rename, `.bak`), state snapshot, event log, crash log, same API |
-| `shell/net.py` | shell | Wi-Fi supervisor (power-save off, reconnect, counters) |
+| `shell/store.py` | shell | one API, two stores: `MemoryStore` (documents kept as JSON text) on the host, `FileStore` on flash (atomic `.tmp` → rename with `.bak`, rotating event log, crash log, boot and reset counters) |
+| `shell/net.py` | shell | Wi-Fi supervisor: reconnect with backoff, the unreachable-AC policy, counters; pure timing over the board and the app |
+| `shell/tasks.py` | shell | the watchdog and housekeeping tasks; `run()` starts all tasks and turns an uncaught exception into `crash.txt` and a reset |
 | `shell/api.py` | shell | Microdot routes from idea.md, token check, body size limit, streamed responses |
-| `shell/app.py` | shell | boot from the store, the asyncio tasks below, the action queue; `_step` is the seam the runner watches |
+| `shell/app.py` | shell | boot from the store, the control task, the action queue, `/api/state`; `_step` is the seam the runner watches. Observe mode (M1) builds no controller: a tick only reads and records history |
 | `board/base.py` | shell | `Board` interface: ticks, `wait(event, ms)` (all sleeps go through it), Wi-Fi link, watchdog, LED, reset, reset cause |
 | `board/pico.py`, `board/host.py` | shell | real hardware / any clock plus a ticks offset, no-op hardware, and a sleep hook for virtual time on the Unix port |
 | `sim/clock.py` | sim | `FakeClock` (moves only when told, can start near the ticks wrap), `ScaledClock` (real time × speed); any callable returning ticks works as the clock |
@@ -51,7 +52,7 @@ Logging: user-facing **events** (ring in RAM, cycle summaries and config saves a
 | `net` | 5 s | check link, reconnect with backoff, reset if offline too long | call anything that resolves names (DNS blocks the loop) |
 | `http` | on request | Microdot; read snapshot, queue actions, save config through `store` | call the AC, hold big strings (stream large responses) |
 | `watchdog` | 1 s | feed the hardware WDT **only if** `control` beat within `2 × poll_s` and `net` beat within 30 s | feed unconditionally |
-| `housekeeping` | 60 s | `gc.collect()`, heap stats (free, largest block), flush flash events | allocate |
+| `housekeeping` | 60 s | `gc.collect()`, heap stats (free, largest block, minimums), `low_memory` event, prune the event ring | allocate |
 
 Rules for code in this loop: no blocking call (no `requests`, no `time.sleep`), no `await` inside a
 read-modify-write of shared state, no `_thread` / second core.
@@ -82,10 +83,27 @@ didn't set → `MANUAL`; while a write is pending, the unchanged previous state 
 | `profiles.json`, `settings.json` (+ `.bak`) | user saves | ~0 |
 | `state.json` (cycle owner, expected AC state, pause, boot counter) | state transitions only | ≤ 50 |
 | `events.log` (rotating, 2 × 8 KB; boot counter + uptime, no timestamps) | cycle end, config save, override, takeover, failed write, reboot | ≤ 50 |
-| `crash.txt` | before a deliberate reset or after an uncaught exception | ~0 |
+| `crash.txt` (the last traceback) | after an uncaught exception | ~0 |
+| `boot.json`, `resets.json` (+ `.bak`) | once per boot: boot counter, resets by cause | a few |
+| `reset_reason.txt` | just before a deliberate reset; read and removed at the next boot | ~0 |
+| `maint` | by `tools/deploy.py` (maintenance flag, see below) | 0 |
 
 History stays in RAM (lost on reboot, accepted). Nothing is written per poll. littlefs spreads wear,
 so ~100 small writes/day is negligible for the 2.5 MB file system.
+
+`FileStore` saves `name.json` by writing `name.json.tmp`, moving the old file to `name.json.bak`, then the `.tmp` into
+place (littlefs `rename` replaces the target; checked on the device). A power cut leaves one of them whole, and `load`
+falls back to the `.bak`. `events.log` moves to `events.1.log` when the next line would pass 8 KB.
+
+**Reset causes.** On the RP2350 `machine.reset()` reports `WDT_RESET`, the same as a real watchdog reset. So every
+deliberate reset (`wifi_down`, `ac_silent`, `crash`, `deploy`) first writes its reason to `reset_reason.txt`; the next
+boot takes the cause from that file, removes it, and counts it in `resets.json`. Without the file the cause is
+`power_on` (`PWRON_RESET`) or `watchdog`. `/api/state` shows this boot's cause, the counts and the last crash line.
+
+**Maintenance flag.** The watchdog can't be stopped once started, and `mpremote` interrupts the running app, so
+copying files to a live board would end in a watchdog reset. If `/maint` exists, `main.py` returns to the REPL before
+anything starts. `deploy.py` sets the flag and resets, copies, then removes it and resets again; device tests run in
+between (`deploy.py --stay`, `--run`).
 
 ## Secrets and personal settings
 
@@ -99,8 +117,10 @@ The repo holds code and templates only. Every personal value lives on the owner'
 
 - Needed before the web UI works → `secrets.py`. Everything else → `settings.json`, edited in the UI
   (`ac_ip` starts as `DAIKIN_IP`).
-- `tools/deploy.py` copies code and `secrets.py`; it refuses to run without `secrets.py` and never overwrites the
-  JSON files on the Pico. `deploy.py --backup` pulls them into `local/`.
+- `tools/deploy.py` compiles `src/smartac` and `src/lib` to `.mpy` (pinned `mpy-cross`) and copies them, `main.py`,
+  `secrets.py` and the page; stale files in its own directories (`/smartac`, `/lib`, `/www`) are removed. It refuses to
+  run without `secrets.py` and never writes or removes the app's files on the Pico. `deploy.py --backup` copies them
+  into `local/`.
 - Missing `secrets.py` on the Pico: no Wi-Fi, a fixed LED error pattern and a message on USB serial.
 - Mac tools take the AC IP from an argument or the `DAIKIN_IP` env var. Tests and CI never need secrets:
   they use the simulator on `127.0.0.1` and fake values.
@@ -114,13 +134,13 @@ The repo holds code and templates only. Every personal value lives on the owner'
 | Write fails or not confirmed | read-back ≠ written | retry next tick; state `STOPPING` keeps retrying "off" until a read shows it off |
 | Human used remote / app | any read ≠ expected while we own the AC, or AC on while idle | `MANUAL` for `manual_hold_min`, then `TAKEOVER` (fan, off) if still on |
 | Wi-Fi down | `net` link check | reconnect with backoff (5 s → 60 s); `machine.reset()` after 15 min down |
-| AC unreachable, Wi-Fi up | `control` misses | after 10 min: reconnect Wi-Fi; after 30 min: reset |
+| AC unreachable, Wi-Fi up | `control` misses (counted from when the link came up) | after 10 min: reconnect Wi-Fi once; after 30 min: reset, **only if the AC answered earlier this boot** (that points to a silent Wi-Fi driver). An AC that never answered may have a new DHCP address, which a reset doesn't fix: no reset loop, the page shows "unreachable for N min" |
 | Loop stall / deadlock | heartbeats stale | watchdog reset (~8 s) |
 | Uncaught exception | top-level handler | write `crash.txt`, reset |
 | Reboot mid-cycle (crash or owner) | `state.json` says we own a cycle | read AC: if it still matches what we set → finish at once (fan phase, then off); else `MANUAL` |
 | Pico switched off mid-cycle | none possible | by design: the AC stays under remote control until the Pico is back (ADR 0003) |
 | Broken or missing config file | parse or validation error at boot | use `.bak`, else built-in defaults; warning in `/api/state` |
-| Low memory | free heap or largest block below a threshold | event + `gc.collect()`; reset if it stays low (soak test watches the trend) |
+| Low memory | free heap < 64 KB or largest block < 24 KB (largest block from `micropython.mem_info()`) | `low_memory` event and counter; the soak watches the trend (no reset yet) |
 
 ## Where code runs
 
@@ -145,14 +165,13 @@ Every source file we write (`.py` in `src/`, `sim/`, `tests/`, `tools/`; `.js`, 
 ## Repo layout
 
 ```
-src/                     copied to the Pico root
-  main.py                entry: build Board, start app
+src/                     copied to the Pico root (as .mpy, except main.py)
+  main.py                entry: maintenance flag, build Board, start app
   smartac/core/          pure logic (above)
   smartac/shell/         async adapters
   smartac/board/         hardware interface + implementations
   lib/microdot/          vendored, pinned (docs/firmware.md)
-  www/                   built, gzipped UI assets
-web/                     UI sources (index.html, app.js, style.css)
+web/                     UI sources; deployed to :www/ (index.html as is until the web build exists)
 sim/                     fake Daikin + room model (MicroPython, Unix port): clock, room, device, server, run.py;
                          scenario.py + harness.py (the month run)
 tests/run.py             test runner (Unix port)
@@ -161,7 +180,8 @@ tests/unit/              core tests, unittest style
 tests/golden/            JSON fixtures: config + sensor trace → expected commands
 tests/integration/       full app against the simulator
 tests/device/            scripts run on the Pico with mpremote
-tools/                   daikin_status.py, daikin_check.py, build_web.py, deploy.py
+tools/                   daikin_status.py, daikin_check.py, deploy.py, soak_log.py (build_web.py later)
+build/                   deploy.py's .mpy output (gitignored)
 local/                   owner's backups of settings/profiles (gitignored)
 docs/
 ```

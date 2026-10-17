@@ -13,7 +13,7 @@ library changes. Why MicroPython: [decisions/0001-language.md](decisions/0001-la
 | File | `RPI_PICO2_W-20260824-v1.29.0.uf2` (1 774 080 bytes) |
 | SHA-256 | `c49c7ed93eb7eeaaa78436b17bd4329e5d4ccbaebc1e79503ad75e0a29c4530e` |
 | Flash layout | 1.5 MB firmware, 2.5 MB littlefs |
-| Tested on the device | 2026-10-16, Pico 2 W: flashed from the UF2 above (SHA-256 checked), spike S7 passed; see below |
+| Tested on the device | 2026-10-16, Pico 2 W: flashed from the UF2 above (SHA-256 checked), spike S7 passed; 2026-10-17 M1 step 0 and the observer; see below |
 
 C components inside this release (submodule commits at the v1.29.0 tag), for bug reports and forks:
 
@@ -31,12 +31,15 @@ Official releases only, copied into the repo unchanged, so a build never depends
 
 | Library | Version | Commit | Status |
 |---|---|---|---|
-| [Microdot](https://github.com/miguelgrinberg/microdot) | v2.7.0 | `7742db9ff9f49635de3387145fafe56bf2377a97` | vendored in `src/lib/microdot/` (core only: `__init__.py`, `microdot.py`, `helpers.py`, LICENSE) |
+| [Microdot](https://github.com/miguelgrinberg/microdot) | v2.7.0 | `7742db9ff9f49635de3387145fafe56bf2377a97` | vendored in `src/lib/microdot/` (core only: `__init__.py`, `microdot.py`, `helpers.py`, LICENSE); deployed as `.mpy` |
 | micropython-lib `unittest` (tests only) | 0.11.0, from the micropython-lib commit above | `ee4bb8ff139e24c42b739935fbd8ec7c4d061e02` | vendored in `tests/lib/unittest/` |
 
 Tests run on the MicroPython Unix port built from the same v1.29.0 tag, on the Mac and in CI.
 `tools/build_micropython.sh` (`make micropython`) clones the tag into `~/.cache/smartac/` (override with `MPY_DIR`),
 checks the tag commit above and builds `ports/unix` with `MICROPY_PY_FFI=0`, the same flags everywhere.
+The same build provides `mpy-cross` (`mpy-cross/build/mpy-cross`, emitting mpy v6.3), which `tools/deploy.py` uses.
+
+Host tools, not on the device: `mpremote` 1.29.0 (pinned in `tools/deploy.py`, run through `pipx run`).
 
 ## Tested on the device
 
@@ -56,8 +59,30 @@ Spike S7, 2026-10-16, Pico 2 W on USB, v1.29.0 flashed from the checked UF2. AC 
 
 Notes for the shell:
 - The board keeps Wi-Fi up across a soft reset (`mpremote run` after a previous run connects in 0 ms); measure from a hard reset.
-- Precompiling Microdot with `mpy-cross` should cut the import time and heap; not tried yet.
-- The AC's address came from a DHCP lease and changed once; the AC needs a DHCP reservation on the router.
+- Precompiling with `mpy-cross` cuts the import time, not the heap: see M1 below.
+- The AC's address came from a DHCP lease and changed once; the AC needs a DHCP reservation on the router. Without
+  one, the observer shows the AC as unreachable and doesn't reset in a loop (architecture.md, "Failure handling").
+
+M1 step 0, 2026-10-17, same board and firmware: `tests/device/probe_m1.py` (no AC traffic).
+
+| Check | Result |
+|---|---|
+| `reset_cause()` after `machine.reset()` | 3 (`WDT_RESET`), the same as a watchdog reset. Constants on this port: `PWRON_RESET` = 1, `WDT_RESET` = 3. So deliberate resets leave `reset_reason.txt` (board/pico.py). |
+| Largest free block | no API (`gc`, `sys`). A binary-search `bytearray` probe takes 115–135 ms (it zero-fills every try): too slow. `micropython.mem_info()` prints `max free sz` (16-byte blocks); copied through `os.dupterm(stream, 0)` it costs **11 ms** and matched the probe exactly (19 389 × 16 = 310 224 bytes on a fragmented heap). Used every 60 s; the text also goes to the USB serial. |
+| `wlan.config(pm=PM_NONE)` | accepted (`0x10`, from the default `0xa11142`), still `0x10` after connecting; connect 3.4–3.5 s; `status('rssi')` returns an int (-32/-33 dBm) |
+| Microdot `.mpy` against `.py` | each measured as the first import in a fresh interpreter (the qstrs a first import interns stay on the heap and skew a second): `.mpy` **80 ms**, 28 KB allocated, 21 KB held; `.py` 475 ms, 55 KB allocated, 21 KB held. Bytecode is loaded into RAM either way, so the held heap is the same; `.mpy` saves the time and the compile peak. `microdot.mpy` is 12 KB (the `.py` 61 KB). |
+| `os.rename` onto an existing file | replaces it on littlefs (`FileStore` relies on this) |
+
+M1 app on the device, 2026-10-17, deployed with `tools/deploy.py` (all `.mpy`, 23 modules, 124 KB):
+
+| Check | Result |
+|---|---|
+| Import and boot | importing the app (board, tasks, app, store and what they pull in) 369 ms, holds 78 KB; the observe-mode `App` (history arrays included) holds 16 KB more. 346 KB free, largest block 285 KB. |
+| Running | after 1 min: 341 KB free, largest block 222 KB, RSSI -39 dBm. `/api/state` OK, `/api/history` (1 440 entries, 43 KB, streamed) in 0.57 s from the Mac, the page in 0.06 s. Mode changes made with the remote show up on the next read. |
+| `tests/device/crash_check.py` | PASS: the traceback is in `crash.txt`, the next boot's cause is `crash`, `last_crash` is the exception line |
+| `tests/device/wdt_check.py` | PASS: control heartbeat stalled, reset ~17 s later (10 s to go stale + 8 s watchdog), next boot's cause `watchdog` |
+| Wi-Fi drop (router restart) | not done yet |
+| 72 h soak (`tools/soak_log.py`) | not done yet |
 
 ## Flashing
 

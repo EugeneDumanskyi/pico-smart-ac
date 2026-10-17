@@ -4,7 +4,8 @@ A Raspberry Pi Pico 2 W that runs a Daikin room AC in short, purposeful cycles i
 It cools when the room is hot, dries when it is humid, always dries the coil afterwards, then switches the AC off.
 The remote always wins: when someone uses it, the Pico steps back.
 
-**Status: design phase.** There is no firmware yet; see the [roadmap](docs/roadmap.md).
+**Status: observer (M1).** The Pico reads the AC every minute and serves its state and a 24 h history, but never
+writes to it. Automation comes later; see the [roadmap](docs/roadmap.md).
 
 ## How it works
 
@@ -32,10 +33,31 @@ The remote always wins: when someone uses it, the Pico steps back.
 
 ## Setup
 
-Not usable yet. The local configuration will be: copy `secrets.example.py` to `secrets.py` (gitignored) and fill in
-your Wi-Fi, the AC's IP address and an API token.
+1. Flash MicroPython onto the Pico 2 W ([firmware.md](docs/firmware.md#flashing)) and build the tools once:
+   `make micropython` (see Development).
+2. Copy `secrets.example.py` to `secrets.py` (gitignored) and fill in your 2.4 GHz Wi-Fi, the AC's IP address and an
+   API token.
+3. With the Pico on USB: `make deploy`. It compiles the code to `.mpy`, copies it with `secrets.py` and the page, and
+   starts the app. It never touches the Pico's own data files (`*.json`, `events*.log`, `crash.txt`).
+4. Open `http://<pico-ip>/` on a phone on the same network. `GET /api/state` and `/api/history?minutes=1440` give JSON.
 
 To read the AC's status from a computer: `python3 tools/daikin_status.py <ac-ip>`.
+
+Deploy options (`python3 tools/deploy.py ...`):
+
+| Option | Does |
+|---|---|
+| (none) | build, copy, start the app |
+| `--build` | only compile into `build/` (`make build`) |
+| `--stay` | deploy, then stay in maintenance mode |
+| `--maint` / `--run` | enter / leave maintenance mode |
+| `--backup` | copy the Pico's data files into `local/backup-<time>/` |
+| `--port <port>` | the serial port, if mpremote doesn't find it |
+
+**Maintenance mode** is the file `/maint` on the Pico: at boot, `main.py` sees it and returns to the REPL before the
+app and its watchdog start, so files can be copied and device tests run (`mpremote run tests/device/<script>.py`).
+
+**Soak log**: `python3 tools/soak_log.py <pico-ip>` writes `/api/state` once a minute to a CSV in `local/`.
 
 ## Development
 
