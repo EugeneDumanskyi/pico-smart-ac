@@ -6,7 +6,7 @@ MICROPYTHON ?= $(MPY_DIR)/ports/unix/build-standard/micropython
 SEED ?= 1
 export MPY_DIR
 
-.PHONY: micropython lint test month
+.PHONY: micropython lint test month build deploy
 
 micropython:
 	tools/build_micropython.sh
@@ -20,3 +20,9 @@ test:
 
 month:
 	$(MICROPYTHON) sim/harness.py --days 30 --seed $(SEED) --quiet
+
+build:
+	python3 tools/deploy.py --build
+
+deploy:
+	python3 tools/deploy.py

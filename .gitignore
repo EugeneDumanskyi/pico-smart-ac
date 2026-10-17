@@ -2,6 +2,7 @@
 secrets.py
 *.local.*
 local/
+build/
 .env
 .env.*
 !.env.example
