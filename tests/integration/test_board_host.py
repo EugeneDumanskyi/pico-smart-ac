@@ -81,7 +81,25 @@ class TestWait(unittest.TestCase):
         board.wdt_start(8000)
         board.wdt_feed()
         board.led("error")
-        board.reset()
+        board.reset("crash")
         self.assertEqual((board.wdt_ms, board.wdt_feeds, board.led_pattern, board.resets), (8000, 1, "error", 1))
-        self.assertEqual(board.reset_cause(), "power_on")
+        self.assertEqual((board.reset_reasons, board.reset_cause()), (["crash"], "power_on"))
+        self.assertEqual(HostBoard(cause="watchdog").reset_cause(), "watchdog")
+
+    def test_fake_link(self):
+        board = HostBoard()
         self.assertTrue(board.link_up())
+        self.assertEqual(board.rssi(), -50)
+        board.wifi_disconnect()
+        self.assertFalse(board.link_up())
+        self.assertIsNone(board.rssi())
+
+        def up():
+            board.link = True
+
+        board.on_connect = up
+        board.wifi_connect()
+        self.assertEqual((board.connects, board.disconnects, board.link_up()), (1, 1, True))
+        free, block = board.heap()
+        self.assertTrue(free > 0)
+        self.assertIsNone(block)
