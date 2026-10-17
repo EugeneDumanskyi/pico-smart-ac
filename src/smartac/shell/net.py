@@ -53,7 +53,7 @@ class NetSupervisor:
                 self.forced = False  # a forced reconnect that never showed the link down is over too
             silent = self._ac_silent_ms(now)
             self._check_ac(silent)
-            b.led("on" if silent is None else "off")
+            b.led("off" if silent is None else "on")  # dark while healthy: lit only when something is wrong
         else:
             if self.up:
                 self._went_down(now)

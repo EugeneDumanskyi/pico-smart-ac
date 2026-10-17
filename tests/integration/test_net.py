@@ -82,7 +82,7 @@ class TestLink(unittest.TestCase):
         stats = rig.run(1 * MIN)
         self.assertEqual(rig.tries, [0])
         self.assertEqual(stats, {"wifi_drops": 0, "wifi_reconnects": 0, "ac_reconnects": 0})
-        self.assertEqual(rig.board.led_pattern, "on")
+        self.assertEqual(rig.board.led_pattern, "off")
 
     def test_drop_backs_off_then_recovers(self):
         rig = Rig()
@@ -139,7 +139,7 @@ class TestSilentAC(unittest.TestCase):
         self.assertEqual((rig.board.disconnects, stats["ac_reconnects"]), (1, 1))
         self.assertEqual((stats["wifi_drops"], stats["wifi_reconnects"]), (0, 0))
         self.assertEqual(rig.resets[0], (30 * MIN, "ac_silent"))
-        self.assertEqual(rig.board.led_pattern, "off")
+        self.assertEqual(rig.board.led_pattern, "on")
 
     def test_never_seen_reconnects_once_and_stays_up(self):
         rig = Rig()

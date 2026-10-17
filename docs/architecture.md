@@ -122,6 +122,8 @@ The repo holds code and templates only. Every personal value lives on the owner'
   run without `secrets.py` and never writes or removes the app's files on the Pico. `deploy.py --backup` copies them
   into `local/`.
 - Missing `secrets.py` on the Pico: no Wi-Fi, a fixed LED error pattern and a message on USB serial.
+- The LED is dark while all is well: steady on means the AC isn't answering with Wi-Fi up, a fast blink means
+  Wi-Fi is down or `secrets.py` is missing (`shell/net.py`, `main.py`).
 - Mac tools take the AC IP from an argument or the `DAIKIN_IP` env var. Tests and CI never need secrets:
   they use the simulator on `127.0.0.1` and fake values.
 - The privacy hooks block committing `secrets.py`, `.env`, `*.local.*` and any value found in `secrets.py`.

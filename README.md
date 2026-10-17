@@ -40,6 +40,8 @@ writes to it. Automation comes later; see the [roadmap](docs/roadmap.md).
 3. With the Pico on USB: `make deploy`. It compiles the code to `.mpy`, copies it with `secrets.py` and the page, and
    starts the app. It never touches the Pico's own data files (`*.json`, `events*.log`, `crash.txt`).
 4. Open `http://<pico-ip>/` on a phone on the same network. `GET /api/state` and `/api/history?minutes=1440` give JSON.
+   The Pico's LED stays dark while all is well. Steady on: the AC isn't answering. Fast blink: Wi-Fi is down or
+   `secrets.py` is missing.
 
 To read the AC's status from a computer: `python3 tools/daikin_status.py <ac-ip>`.
 
