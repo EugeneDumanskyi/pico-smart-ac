@@ -12,3 +12,4 @@ known-first-party = ["smartac"]
 [lint.per-file-ignores]
 # MicroPython script: ruff sorts `secrets` (ours) as CPython's stdlib module.
 "tools/daikin_check.py" = ["I001"]
+"tests/device/*.py" = ["I001"]

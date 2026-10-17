@@ -33,6 +33,7 @@ COOLDOWN = "COOLDOWN"
 MANUAL = "MANUAL"
 TAKEOVER = "TAKEOVER"
 PAUSED = "PAUSED"
+OBSERVE = "OBSERVE"  # the app reads only and runs no controller (shell/app.py, observe mode)
 
 # User actions (POST /api/action, /api/active).
 ACT_PAUSE = "pause"
@@ -64,6 +65,7 @@ EV_WRITE_FAILED = "write_failed"
 EV_WOULD = "would"  # dry_run: a write that was not sent
 EV_CONFIG_SAVED = "config_saved"
 EV_IGNORED = "ignored"  # an action that doesn't apply in the current state
+EV_LOW_MEMORY = "low_memory"  # free heap or the largest block fell below its threshold (shell/tasks.py)
 
 
 def tenths(celsius):

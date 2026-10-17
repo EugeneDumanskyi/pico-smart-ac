@@ -23,8 +23,8 @@ class Stop(Exception):
 
 
 class _App(App):
-    def __init__(self, world, board):
-        super().__init__(board, world.store, HOST, DEFAULT_PORT)
+    def __init__(self, world, board, observe=False):
+        super().__init__(board, world.store, HOST, DEFAULT_PORT, observe=observe)
         self.world = world
 
     def _step(self, now, reading, actions, readback=False):
@@ -45,8 +45,8 @@ class World:
         self.store.save("profiles", profiles)
         self.steps = []
 
-    def app(self):
-        return _App(self, HostBoard(clock=self.clock, sleep=self.sched.sleep))
+    def app(self, observe=False):
+        return _App(self, HostBoard(clock=self.clock, sleep=self.sched.sleep), observe)
 
     def run(self, app, until_ms):
         def stop():
@@ -97,8 +97,9 @@ class TestTick(unittest.TestCase):
         ctl = app.controller
         self.assertEqual((ctl.state, ctl.expected, ctl.written), (t.RUNNING, DRY, None))
         s = app.status()
-        self.assertEqual((s["reads"], s["writes"], s["write_errors"], s["uptime_s"]), (3, 1, 0, 70))
-        self.assertEqual(s["reading"]["ac"], {"power": True, "mode": "dry", "target": None, "fan": "auto"})
+        self.assertEqual((s["reads"], s["writes"], s["write_errors"], s["device"]["uptime_s"]), (3, 1, 0, 70))
+        self.assertEqual(s["ac"], {"reachable": True, "power": True, "mode": "dry", "target_c": None, "fan": "auto"})
+        self.assertEqual(s["state"], t.RUNNING)
 
     def test_rejected_write_is_counted_and_judged_by_the_read_back(self):
         w = World("day")
@@ -186,3 +187,72 @@ class TestStore(unittest.TestCase):
         w = World()
         w.app()
         self.assertEqual(json.loads(w.store.events[0])["kind"], t.EV_BOOT)
+
+
+class TestObserve(unittest.TestCase):
+    def test_reads_and_records_but_never_writes(self):
+        # The day profile would start a dry cycle on the second read (TestTick); observe mode sends nothing.
+        w = World("day")
+        app = w.app(observe=True)
+        self.assertIsNone(app.controller)
+        w.run(app, 3 * 60 * 1000 + 1000)
+        self.assertEqual((w.device.writes, app.writes, w.steps), (0, 0, []))
+        self.assertFalse(w.device.ac().power)
+        self.assertEqual(app.reads, 4)
+        d = json.loads("".join(app.history_chunks(1440)))
+        self.assertEqual(len(d["temp"]), 1440)
+        self.assertEqual(d["temp"][-4:], [29.0] * 4)
+        self.assertEqual(d["power"][-4:], [False] * 4)
+        self.assertEqual(d["last_age_s"], 1)
+
+    def test_status_shape(self):
+        w = World()
+        app = w.app(observe=True)
+        w.run(app, 1000)
+        s = app.status()
+        self.assertEqual((s["state"], s["profile"], s["dry_run"]), (t.OBSERVE, None, False))
+        self.assertEqual(s["room"], {"temp": 29.0, "hum": 80})
+        self.assertEqual(s["ac"]["reachable"], True)
+        self.assertEqual((s["last_error"], s["unreachable_s"], s["config_warning"]), (None, None, None))
+        d = s["device"]
+        self.assertEqual((d["boot"], d["reset_cause"], d["last_crash"]), (1, "power_on", None))
+        self.assertEqual(d["resets"], {"power_on": 1})
+        self.assertEqual((d["uptime_s"], d["rssi"]), (1, -50))
+        app.stats["wifi_reconnects"] = 2
+        self.assertEqual(app.status()["device"]["wifi_reconnects"], 2)
+        json.dumps(s)
+
+    def test_unreachable_time_and_seen_ac(self):
+        w = World()
+        app = w.app(observe=True)
+        w.run(app, 1000)
+        self.assertTrue(app.seen_ac)
+        w.device.unreachable(10)
+        w.run(app, 5 * 60 * 1000)
+        s = app.status()
+        self.assertFalse(s["ac"]["reachable"])
+        self.assertEqual(s["room"], {"temp": None, "hum": None})
+        self.assertTrue(s["last_error"])
+        # The second run starts a new control loop: the first failed read is at 0:01, now is 5:00.
+        self.assertEqual(s["unreachable_s"], 299)
+        w.run(app, 12 * 60 * 1000)
+        self.assertIsNone(app.status()["unreachable_s"])
+
+    def test_never_seen_without_an_address(self):
+        w = World()
+        app = _App(w, HostBoard(clock=w.clock, sleep=w.sched.sleep), True)
+        app.client = None
+        w.run(app, 1000)
+        self.assertFalse(app.seen_ac)
+        self.assertEqual(app.status()["last_error"], "no AC address")
+        self.assertEqual(app.status()["unreachable_s"], 1)
+
+    def test_crash_and_reset_cause_from_the_store(self):
+        w = World()
+        w.store.save_crash("Traceback (most recent call last):\n  File x\nMemoryError: memory allocation failed\n")
+        w.store.reset_counts("watchdog")
+        app = _App(w, HostBoard(clock=w.clock, sleep=w.sched.sleep, cause="crash"), True)
+        d = app.status()["device"]
+        self.assertEqual(d["last_crash"], "MemoryError: memory allocation failed")
+        self.assertEqual((d["reset_cause"], d["resets"]), ("crash", {"watchdog": 1, "crash": 1}))
+        self.assertEqual(json.loads(w.store.events[0])["msg"], "boot 1 (crash)")

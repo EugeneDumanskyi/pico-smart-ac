@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- Bare status page (M1): polls /api/state every 5 s. No build step yet; deploy copies it to :www/index.html. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>smartac</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1b1b1b; --bg: #fafafa; --dim: #6b6b6b; --line: #ddd; --bad: #b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #e8e8e8; --bg: #161616; --dim: #9a9a9a; --line: #333; --bad: #f2867e; }
+  }
+  body { margin: 0; padding: 16px; font: 16px/1.4 system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+  main { max-width: 32rem; margin: 0 auto; }
+  h1 { font-size: 1rem; font-weight: 600; margin: 0 0 12px; }
+  .big { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; }
+  .big div { font-size: 2rem; font-variant-numeric: tabular-nums; }
+  .big small { display: block; font-size: .8rem; color: var(--dim); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  td { padding: 4px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  td:first-child { color: var(--dim); width: 40%; }
+  #err { color: var(--bad); min-height: 1.4em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>smartac <span id="state"></span></h1>
+  <div class="big">
+    <div><small>room</small><span id="temp">–</span></div>
+    <div><small>humidity</small><span id="hum">–</span></div>
+    <div><small>outdoor</small><span id="out">–</span></div>
+  </div>
+  <p id="err"></p>
+  <table id="rows"></table>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const deg = (v) => (v == null ? "–" : v.toFixed(1) + " °C");
+const dur = (s) => {
+  if (s == null) return "–";
+  const d = Math.floor(s / 86400), h = Math.floor(s / 3600) % 24, m = Math.floor(s / 60) % 60;
+  return (d ? d + " d " : "") + (d || h ? h + " h " : "") + m + " min";
+};
+const kb = (b) => (b == null ? "–" : Math.round(b / 1024) + " KB");
+
+function render(s) {
+  const ac = s.ac, d = s.device;
+  $("state").textContent = s.state;
+  $("temp").textContent = deg(s.room.temp);
+  $("hum").textContent = s.room.hum == null ? "–" : s.room.hum + " %";
+  $("out").textContent = deg(s.outdoor_temp);
+  $("err").textContent = s.unreachable_s != null
+    ? "AC not reachable for " + dur(s.unreachable_s) + (s.last_error ? " (" + s.last_error + ")" : "")
+    : (s.config_warning || "");
+  const acText = !ac.reachable ? "unreachable"
+    : (ac.power ? "on" : "off") + ", " + ac.mode + (ac.target_c != null ? " " + ac.target_c + " °C" : "")
+      + (ac.fan ? ", fan " + ac.fan : "");
+  const resets = Object.entries(d.resets || {}).map(([k, v]) => k + " " + v).join(", ");
+  const rows = [
+    ["AC", acText],
+    ["reads", s.reads + " (" + s.read_errors + " failed)"],
+    ["uptime", dur(d.uptime_s)],
+    ["boot", d.boot + " (" + d.reset_cause + ")"],
+    ["resets", resets || "–"],
+    ["last crash", d.last_crash || "–"],
+    ["heap free", kb(d.heap_free) + ", largest block " + kb(d.heap_max_block)],
+    ["Wi-Fi", (d.rssi == null ? "down" : d.rssi + " dBm") + ", drops " + d.wifi_drops
+      + ", reconnects " + d.wifi_reconnects + ", for the AC " + d.ac_reconnects],
+    ["firmware", d.fw],
+  ];
+  const t = $("rows");
+  t.replaceChildren(...rows.map(([k, v]) => {
+    const tr = document.createElement("tr");
+    for (const text of [k, v]) {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.append(td);
+    }
+    return tr;
+  }));
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/api/state", { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    render(await r.json());
+  } catch (e) {
+    $("err").textContent = "Pico not reachable (" + e.message + ")";
+  }
+  setTimeout(poll, 5000);
+}
+poll();
+</script>
+</body>
+</html>
