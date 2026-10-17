@@ -31,10 +31,10 @@ the contract; the same logic runs on the Mac against a simulator ([ADR 0002](dec
 | Dry mode `0500` | confirmed (S2); no target temperature, see below |
 | Streamer | readable, **not** writable (rsc 4000); stays as the remote set it across API writes (S4) |
 | Mold-proof | unmapped |
-| Room readings while the unit is off | update (S1, 2026-10-16): temp 0.5 °C steps, humidity 5 % steps; overnight run open |
+| Room readings while the unit is off | update (S1, 2026-10-16, incl. a 6.5 h off period overnight): temp 0.5 °C steps, humidity 5 % steps |
 
 Facts that shape the design:
-- **Sensor is the AC's own**, near the ceiling, in whole degrees. "> 29" really means "≥ 30".
+- **Sensor is the AC's own**, near the ceiling, in 0.5 °C steps. "> 29" really means "≥ 29.5".
   Right after the unit stops, readings can drift, so a cooldown wait is needed before judging again.
 - **The remote overwrites everything** when any button is pressed (one-way IR, full state).
 - **No auth on the API**: anything on the LAN can control the AC.
@@ -388,6 +388,4 @@ Scheduled releases for these are in [roadmap.md](roadmap.md#after-v10).
 - Dry mode on this unit takes no target temperature, only a relative offset from 0 to −3.0 °C in 0.5 steps (more
   negative cools more; the owner uses −1.0). The API field is not mapped yet: change it on the remote and diff.
   v1 does not write it, so the AC keeps the remote's value.
-- Do room readings update while the unit is off, and how much do they jump at start/stop? (spike S1) If not,
-  the external sensor moves into v1.0.
 - Power use: the API has daily/weekly usage history (units not yet decoded).

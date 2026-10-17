@@ -50,8 +50,11 @@ off 18 min, cool 14 min, fan 20 min, off 24 min. No reference thermometer in the
 - The fan phase after cool brings humidity straight back (75 → 85 % in 6 min): the coil drying effect from idea.md.
 - Outdoor temperature is measured at the outdoor unit: it reads 4.5 °C high while the compressor runs and settles
   ~13 min after it stops. While off it barely moved (0.5 °C in 42 min), so it may refresh slowly when idle.
-- Open: off-periods were short (18 and 24 min) on a day with a steady room. An overnight off run on the Pico
-  (`tools/pico_log.py`) checks that the temperature keeps following the room for hours.
+- Overnight on the Pico (`tools/pico_log.py`, 1 reading/min, 2026-10-16 03:23 to 2026-10-17 02:05 UTC): 1366 rows,
+  no gap over 90 s, no read errors, with the AC used normally (13 off periods). The longest off period, 6.5 h, went
+  25.5 → 29.5 °C in steady 0.5 °C steps over 3 h, then held 29.5 for 3.5 h while outdoor still moved (30.0 → 29.0).
+  Every off period shows the room warming back, and no start or stop has a step larger than one 0.5 °C reading.
+  **S1 is closed: built-in readings are good enough for v1 triggers; the external sensor stays in v1.2.**
 
 ## Dry mode as a write (spike S2, 2026-10-16)
 
