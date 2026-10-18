@@ -170,6 +170,7 @@ class Controller:
         self.pause = None
         self.misses = 0
         self.queued = []  # actions held over a read-back step or until boot is decided
+        self.why = None  # why the last phase ended, for the off write's event; messages only, not persisted
         self.booting = snapshot is not None
         if snapshot is not None:
             self._restore(snapshot)
@@ -330,6 +331,7 @@ class Controller:
 
     def _release(self):
         # Give up the AC and the cycle.
+        self.why = None
         self.cycle = None
         self.cycle_start = None
         self.phase_start = None
@@ -405,18 +407,21 @@ class Controller:
         rule["phases"] = phases
         self.cycle["rule"] = rule
 
-    def _goto(self, i, out):
+    def _goto(self, i, out, why=None):
         c = self.cycle
         c["phase"] = i
         self.phase_start = None
         phases = c["rule"]["phases"]
-        self._event(out, EV_PHASE, "phase %d/%d: %s" % (i + 1, len(phases), _describe(_phase_state(phases[i]))))
+        msg = "phase %d/%d: %s" % (i + 1, len(phases), _describe(_phase_state(phases[i])))
+        self._event(out, EV_PHASE, msg if why is None else "%s (%s)" % (msg, why))
 
-    def _next_phase(self, out):
+    def _next_phase(self, out, why):
+        # why: what ended the phase ("goal hum <= 65" or "45 min"), shown on the next phase or the off write.
         c = self.cycle
         if c["phase"] + 1 < len(c["rule"]["phases"]):
-            self._goto(c["phase"] + 1, out)
+            self._goto(c["phase"] + 1, out, why)
         else:
+            self.why = why
             self.state = STOPPING
 
     def _finish(self, out, restart=False):
@@ -525,9 +530,11 @@ class Controller:
                 self.state = STOPPING
             elif self.phase_start is not None:
                 phase = c["rule"]["phases"][c["phase"]]
-                elapsed = ticks_since(now, self.phase_start)
-                if elapsed >= phase["max_min"] * MIN_MS or goal_met(phase.get("until"), reading):
-                    self._next_phase(out)
+                until = phase.get("until")
+                if goal_met(until, reading):
+                    self._next_phase(out, "goal " + _goal_text(until))
+                elif ticks_since(now, self.phase_start) >= phase["max_min"] * MIN_MS:
+                    self._next_phase(out, "%d min" % phase["max_min"])
 
         if self.state == STOPPING and self.written is None and not self.sent.power:
             self._end(now, out)
@@ -547,8 +554,10 @@ class Controller:
             self.fails = 0
         self.sent = want
         self.judged = False
+        why, self.why = self.why, None
         if c["dry_run"]:
-            self._event(out, EV_WOULD, "would set " + _describe(want))
+            msg = "would set " + _describe(want)
+            self._event(out, EV_WOULD, msg if why is None else "%s (%s)" % (msg, why))
         else:
             self.written = want
             out.append((CMD_WRITE, want))

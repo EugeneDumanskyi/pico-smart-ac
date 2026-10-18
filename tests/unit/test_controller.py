@@ -70,6 +70,10 @@ def events(cmds):
     return [p[0] for k, p in cmds if k == t.CMD_EVENT]
 
 
+def msgs(cmds):
+    return [p[1] for k, p in cmds if k == t.CMD_EVENT]
+
+
 class Rig:
     # A controller, a fake clock and a fake AC that applies writes (unless apply is False).
     def __init__(self, rules=None, active="test", snapshot=None, start=0, ac=OFF_AC, **settings):
@@ -1182,6 +1186,30 @@ class TestDryRun(unittest.TestCase):
         rig.polls(3)
         rig.ac = HUMAN
         self.assertEqual(events(rig.poll()), [t.EV_MANUAL])
+
+    def test_messages_say_why_a_phase_ended(self):
+        rig = Rig(dry_run=True)
+        rig.temp = 300
+        self.assertEqual(msgs(rig.poll()), ["hot: cool 26.0, fan auto", "would set cool 26.0, fan auto"])
+        rig.polls(4)
+        rig.temp = 260
+        self.assertEqual(msgs(rig.poll()), ["phase 2/2: fan, fan 3 (goal temp <= 26)", "would set fan, fan 3"])
+        rig.polls(19)
+        self.assertEqual(msgs(rig.poll()), ["would set off (20 min)"])
+        self.assertEqual(msgs(rig.poll()), ["hot ended"])
+
+    def test_time_runs_out_before_the_goal(self):
+        rig = Rig(dry_run=True)
+        rig.temp = 300
+        rig.polls(30)
+        self.assertEqual(msgs(rig.poll()), ["phase 2/2: fan, fan 3 (30 min)", "would set fan, fan 3"])
+
+    def test_stops_by_hand_have_no_reason(self):
+        rig = Rig(dry_run=True, rules=[DAMP])
+        rig.hum = 80
+        rig.polls(3)
+        self.assertEqual(msgs(rig.act(action="stop")), ["phase 2/2: fan, fan auto", "would set fan, fan auto"])
+        self.assertEqual(msgs(rig.act(action="stop_now")), ["would set off"])
 
     def test_copied_at_start(self):
         rig = Rig(dry_run=True)

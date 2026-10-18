@@ -3,13 +3,24 @@
 # controller, persist, write at most once, wait SETTLE_MS, read back. Only the control task talks to the AC;
 # action() is the one way in for the HTTP layer. Exceptions propagate: shell/tasks.py logs and resets.
 # Observe mode (M1) builds no controller: a tick reads the AC and records history, so nothing can write.
+# Shadow mode (M3) runs the controller with dry_run forced on, whatever settings.json and state.json say, and keeps
+# its decisions on flash. A write that still comes out is not sent: it becomes a `blocked` event.
 import asyncio
 
 from smartac.core import config
 from smartac.core.controller import Controller
-from smartac.core.events import EventLog, to_line
+from smartac.core.events import FLASH_KINDS, SHADOW_FLASH_KINDS, EventLog, to_line
 from smartac.core.history import History
-from smartac.core.types import CMD_EVENT, CMD_PERSIST, CMD_WRITE, EV_BOOT, OBSERVE, Reading, ticks_since
+from smartac.core.types import (
+    CMD_EVENT,
+    CMD_PERSIST,
+    CMD_WRITE,
+    EV_BLOCKED,
+    EV_BOOT,
+    OBSERVE,
+    Reading,
+    ticks_since,
+)
 from smartac.shell.daikin import DaikinClient
 
 SETTLE_MS = 5000  # write -> read-back
@@ -21,6 +32,15 @@ def _c(tenths):
     return None if tenths is None else tenths / 10
 
 
+def _shadow_snapshot(snap):
+    # A restored cycle is finished in dry_run too, whatever it started as.
+    if not isinstance(snap, dict) or not isinstance(snap.get("cycle"), dict):
+        return snap
+    snap = dict(snap)
+    snap["cycle"] = dict(snap["cycle"], dry_run=True)
+    return snap
+
+
 def _crash_line(text):
     # The last line of a traceback is the exception itself, which is what /api/state shows.
     if not text:
@@ -30,11 +50,12 @@ def _crash_line(text):
 
 
 class App:
-    def __init__(self, board, store, ac_ip=None, ac_port=80, observe=False):
+    def __init__(self, board, store, ac_ip=None, ac_port=80, observe=False, shadow=False):
         # ac_ip: DAIKIN_IP from secrets.py, used until settings.json names one.
         self.board = board
         self.store = store
         self.observe = observe
+        self.shadow = shadow
         self.boot = store.next_boot()
         self.reset_cause = board.reset_cause()
         self.resets = store.reset_counts(self.reset_cause)
@@ -53,10 +74,14 @@ class App:
                 lambda doc: config.validate_profiles(doc, settings["hard_cap_min"]),
                 config.default_profiles(),
             )
-            self.controller = Controller(profiles, settings, now, store.load("state"))
+            snap = store.load("state")
+            if shadow:
+                settings = dict(settings, dry_run=True)
+                snap = _shadow_snapshot(snap)
+            self.controller = Controller(profiles, settings, now, snap)
             self.active = profiles.get("active")  # as stored in profiles.json
         self.history = History()
-        self.events = EventLog(self.boot)
+        self.events = EventLog(self.boot, flash_kinds=SHADOW_FLASH_KINDS if shadow else FLASH_KINDS)
         self.queue = []
         self.wake = asyncio.Event()
         self.uptime_ms = 0
@@ -99,7 +124,9 @@ class App:
     def status(self):
         # /api/state (idea.md, "HTTP API").
         now = self._now()
-        s = {"state": OBSERVE, "profile": None} if self.controller is None else self.controller.status(now)
+        ctl = self.controller
+        s = {"state": OBSERVE, "profile": None} if ctl is None else ctl.status(now)
+        profiles = {} if ctl is None else ctl.profiles.get("profiles", {})
         r = self.last_reading
         ac = None if r is None else r.ac
         w = self.warnings
@@ -125,6 +152,8 @@ class App:
                     "fan": None if ac is None else ac.fan,
                 },
                 "dry_run": self._settings()["dry_run"],
+                "shadow": self.shadow,
+                "profiles": [{"name": k, "label": profiles[k].get("label", k)} for k in sorted(profiles)],
                 "last_error": None if r is None else r.error,
                 "unreachable_s": None if unreachable is None else unreachable // 1000,
                 "config_warning": "%s: %s" % (w[0]["path"], w[0]["msg"]) if w else None,
@@ -150,6 +179,14 @@ class App:
         self._now()
         return self.history.chunks(self.uptime_ms, minutes)
 
+    def event_rows(self, limit):
+        # /api/events: this boot's ring, newest first. limit: the query value, any garbage -> 100.
+        try:
+            limit = min(max(int(limit), 1), self.events.size)
+        except (TypeError, ValueError):
+            limit = 100
+        return self.events.export(self._now(), limit)
+
     def poll_ms(self):
         return self._settings()["poll_s"] * 1000
 
@@ -160,7 +197,12 @@ class App:
     def log(self, kind, msg):
         # To events.log only, not the RAM ring: the hourly heap line (housekeeping) would crowd real events out of it.
         self._now()
-        self.store.append_event(to_line(self.events.boot, self.uptime_ms, kind, msg))
+        temp, hum = self._sensors()
+        self.store.append_event(to_line(self.events.boot, self.uptime_ms, kind, msg, temp, hum))
+
+    def _sensors(self):
+        r = self.last_reading
+        return (None, None) if r is None else (r.temp, r.hum)
 
     def _settings(self):
         return self.settings if self.controller is None else self.controller.settings
@@ -188,6 +230,10 @@ class App:
         now = self._now()
         write = self._apply(now, self._step(now, reading, actions))
         if write is None:
+            return
+        if self.shadow:
+            # Never sent, and not counted: writes stays 0, the read-only proof.
+            self._event(now, EV_BLOCKED, "not sent: %r" % write)
             return
         err = await self.client.write(write)
         self.writes += 1
@@ -245,7 +291,9 @@ class App:
             self.active = snap["profile"]
 
     def _event(self, now, kind, msg):
-        line = self.events.add(now, self.uptime_ms, kind, msg)
+        # Each event carries the last reading: the one this step decided on.
+        temp, hum = self._sensors()
+        line = self.events.add(now, self.uptime_ms, kind, msg, temp, hum)
         if line is not None:
             self.store.append_event(line)
 

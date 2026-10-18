@@ -23,8 +23,8 @@ class Stop(Exception):
 
 
 class _App(App):
-    def __init__(self, world, board, observe=False):
-        super().__init__(board, world.store, HOST, DEFAULT_PORT, observe=observe)
+    def __init__(self, world, board, observe=False, shadow=False):
+        super().__init__(board, world.store, HOST, DEFAULT_PORT, observe=observe, shadow=shadow)
         self.world = world
 
     def _step(self, now, reading, actions, readback=False):
@@ -45,8 +45,8 @@ class World:
         self.store.save("profiles", profiles)
         self.steps = []
 
-    def app(self, observe=False):
-        return _App(self, HostBoard(clock=self.clock, sleep=self.sched.sleep), observe)
+    def app(self, observe=False, shadow=False):
+        return _App(self, HostBoard(clock=self.clock, sleep=self.sched.sleep), observe, shadow)
 
     def run(self, app, until_ms):
         def stop():
@@ -211,6 +211,7 @@ class TestObserve(unittest.TestCase):
         w.run(app, 1000)
         s = app.status()
         self.assertEqual((s["state"], s["profile"], s["dry_run"]), (t.OBSERVE, None, False))
+        self.assertEqual((s["shadow"], s["profiles"]), (False, []))
         self.assertEqual(s["room"], {"temp": 29.0, "hum": 80})
         self.assertEqual(s["ac"]["reachable"], True)
         self.assertEqual((s["last_error"], s["unreachable_s"], s["config_warning"]), (None, None, None))
@@ -256,3 +257,91 @@ class TestObserve(unittest.TestCase):
         self.assertEqual(d["last_crash"], "MemoryError: memory allocation failed")
         self.assertEqual((d["reset_cause"], d["resets"]), ("crash", {"watchdog": 1, "crash": 1}))
         self.assertEqual(json.loads(w.store.events[0])["msg"], "boot 1 (crash)")
+
+
+def flash(store):
+    return [json.loads(line) for line in store.events]
+
+
+class TestShadow(unittest.TestCase):
+    def world(self, active="day"):
+        # settings.json asks for real writes: shadow mode must ignore that.
+        w = World(active)
+        w.store.save("settings", dict(config.default_settings(HOST), dry_run=False))
+        return w
+
+    def test_whole_cycles_without_a_write(self):
+        w = self.world()
+        app = w.app(shadow=True)
+        w.run(app, 6 * 60 * 60 * 1000)
+        kinds = w.kinds()
+        for kind in (t.EV_CYCLE_START, t.EV_WOULD, t.EV_PHASE, t.EV_CYCLE_END):
+            self.assertIn(kind, kinds)
+        self.assertEqual((w.device.writes, app.writes, app.write_errors), (0, 0, 0))
+        self.assertFalse(w.device.ac().power)
+        self.assertFalse(any(s[1] for s in w.steps))  # no read-back: nothing was sent
+        self.assertFalse(t.EV_BLOCKED in kinds)
+        # The decisions reach the flash log, each with the reading it was made on.
+        lines = flash(w.store)
+        would = [d for d in lines if d["kind"] == t.EV_WOULD]
+        self.assertEqual(len(would), kinds.count(t.EV_WOULD))
+        self.assertEqual(would[0]["msg"], "would set dry, fan auto")
+        self.assertEqual((would[0]["temp"], would[0]["hum"]), (29.0, 80))
+        self.assertTrue(any(d["kind"] == t.EV_CYCLE_START for d in lines))
+        self.assertEqual(lines[0]["kind"], t.EV_BOOT)
+
+    def test_status(self):
+        w = self.world()
+        app = w.app(shadow=True)
+        w.run(app, 1000)
+        s = app.status()
+        self.assertEqual((s["shadow"], s["dry_run"], s["profile"], s["state"]), (True, True, "day", t.IDLE))
+        self.assertEqual([p["name"] for p in s["profiles"]], ["away", "day", "night"])
+        self.assertEqual(s["profiles"][1], {"name": "day", "label": "Day"})
+        self.assertFalse(app.settings["dry_run"])  # settings.json itself is left as it is
+        json.dumps(s)
+
+    def test_restored_live_cycle_is_not_written(self):
+        # A real cycle (M4) was cut right after its first write; the next boot is in shadow mode.
+        w = self.world()
+        app = w.app()
+        stop_after_write(app)
+        w.run(app, 70 * 1000)
+        self.assertEqual((w.device.writes, w.store.load("state")["cycle"]["dry_run"]), (1, False))
+        w.device.remote(t.ACState(False, t.MODE_DRY, None, t.FAN_AUTO))  # the owner switched it off
+        app = w.app(shadow=True)
+        self.assertTrue(app.controller.cycle["dry_run"])
+        w.steps = []
+        w.run(app, 3 * 60 * 60 * 1000)
+        self.assertEqual((w.device.writes, app.writes), (1, 0))
+        self.assertIn(t.EV_WOULD, w.kinds())
+        self.assertFalse(t.EV_BLOCKED in w.kinds())
+
+    def test_backstop_blocks_a_write(self):
+        # A write that gets past dry_run anyway (a bug) is logged, not sent, and not counted.
+        w = self.world()
+        app = w.app(shadow=True)
+        step = app._step
+
+        def leaky(now, reading, actions, readback=False):
+            return step(now, reading, actions, readback) + [(t.CMD_WRITE, DRY)]
+
+        app._step = leaky
+        w.run(app, 61 * 1000)
+        self.assertEqual((w.device.writes, app.writes), (0, 0))
+        self.assertFalse(w.device.ac().power)
+        self.assertEqual(w.polls(), [0, 60000])
+        blocked = [d for d in flash(w.store) if d["kind"] == t.EV_BLOCKED]
+        self.assertEqual(len(blocked), 2)
+        self.assertTrue(blocked[0]["msg"].startswith("not sent: ACState(True"), blocked[0]["msg"])
+        self.assertEqual(blocked[0]["temp"], 29.0)
+
+    def test_profile_action_starts_from_off(self):
+        w = self.world("off")
+        app = w.app(shadow=True)
+        w.sched.at(5 * 1000, lambda: app.action({"action": "set_profile", "profile": "day", "cycle": "finish"}))
+        w.run(app, 70 * 1000)
+        self.assertEqual(w.store.load("profiles")["active"], "day")
+        self.assertEqual([(d["kind"], d["msg"]) for d in flash(w.store)][1], (t.EV_PROFILE, "profile day"))
+        self.assertEqual(app.controller.state, t.RUNNING)
+        self.assertEqual(w.device.writes, 0)

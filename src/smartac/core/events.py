@@ -7,16 +7,27 @@
 # base_ms + a stamp, and prune() moves the stamp up to now once it is REBASE_MS old. The shell calls prune()
 # from its 60 s housekeeping, and add()/export() call it too, so no stamp gets near the wrap.
 #
-# Flash: add() returns the line for events.log for the kinds in FLASH_KINDS; store.py only appends and rotates.
+# Readings: each event keeps the room temp (tenths) and humidity of the step it was decided on, so a decision
+# can be judged later. JSON (rows and lines) gives temp in degrees C, like /api/state.
+#
+# Flash: add() returns the line for events.log for the kinds in flash_kinds; store.py only appends and rotates.
 # A line holds the boot number and uptime, no clock time (the age of an earlier boot's event is unknown).
+# Shadow mode (M3) also keeps the decisions on flash (SHADOW_FLASH_KINDS), for the week's review.
 import json
 
 from smartac.core.types import (
+    EV_BLOCKED,
     EV_BOOT,
     EV_CONFIG_SAVED,
     EV_CYCLE_END,
+    EV_CYCLE_START,
+    EV_HARD_CAP,
     EV_MANUAL,
+    EV_PHASE,
+    EV_PROFILE,
     EV_TAKEOVER,
+    EV_UNREACHABLE,
+    EV_WOULD,
     EV_WRITE_FAILED,
     ticks_since,
 )
@@ -25,42 +36,68 @@ SIZE = 200
 MAX_MSG = 80  # longer messages are cut, which bounds the ring's RAM
 REBASE_MS = 24 * 60 * 60 * 1000
 FLASH_KINDS = (EV_CYCLE_END, EV_MANUAL, EV_TAKEOVER, EV_WRITE_FAILED, EV_CONFIG_SAVED, EV_BOOT)
+SHADOW_FLASH_KINDS = FLASH_KINDS + (
+    EV_CYCLE_START,
+    EV_PHASE,
+    EV_WOULD,
+    EV_HARD_CAP,
+    EV_PROFILE,
+    EV_UNREACHABLE,
+    EV_BLOCKED,
+)
 
 
-def to_flash(kind):
-    return kind in FLASH_KINDS
+def to_flash(kind, kinds=FLASH_KINDS):
+    return kind in kinds
 
 
-def to_line(boot, uptime_ms, kind, msg):
-    return json.dumps({"boot": boot, "up_s": uptime_ms // 1000, "kind": kind, "msg": msg})
+def _c(tenths):
+    return None if tenths is None else tenths / 10
+
+
+def to_line(boot, uptime_ms, kind, msg, temp=None, hum=None):
+    # temp in tenths, hum in percent; None if the step had no reading.
+    return json.dumps({"boot": boot, "up_s": uptime_ms // 1000, "kind": kind, "msg": msg, "temp": _c(temp),
+                       "hum": hum})
+
+
+def _num(v):
+    return v is None or (isinstance(v, (int, float)) and not isinstance(v, bool))
 
 
 def from_line(line):
     # A flash line -> an /api/events row (age_s is None: its boot's clock is gone), or None if it is corrupt.
+    # Lines from before M3 have no temp and hum: they read as None.
     try:
         d = json.loads(line)
-        row = {"age_s": None, "boot": d["boot"], "kind": d["kind"], "msg": d["msg"]}
-    except (ValueError, KeyError, TypeError):
+        row = {"age_s": None, "boot": d["boot"], "kind": d["kind"], "msg": d["msg"], "temp": d.get("temp"),
+               "hum": d.get("hum")}
+    except (ValueError, KeyError, TypeError, AttributeError):
         return None
     if not isinstance(row["boot"], int) or not isinstance(row["kind"], str) or not isinstance(row["msg"], str):
+        return None
+    if not _num(row["temp"]) or not _num(row["hum"]):
         return None
     return row
 
 
 class EventLog:
-    def __init__(self, boot, size=SIZE):
+    def __init__(self, boot, size=SIZE, flash_kinds=FLASH_KINDS):
         self.boot = boot
         self.size = size
+        self.flash_kinds = flash_kinds
         # Parallel lists, allocated once: age = base_ms + ticks_since(now, stamp).
         self.stamp = [0] * size
         self.base_ms = [0] * size
         self.up_ms = [0] * size
         self.kind = [None] * size
         self.msg = [None] * size
+        self.temp = [None] * size  # tenths
+        self.hum = [None] * size
         self.head = 0  # the next slot to write
         self.count = 0
 
-    def add(self, now, uptime_ms, kind, msg):
+    def add(self, now, uptime_ms, kind, msg, temp=None, hum=None):
         # Store an event; returns its flash line, or None if this kind stays in RAM.
         self.prune(now)
         msg = msg[:MAX_MSG]
@@ -70,11 +107,13 @@ class EventLog:
         self.up_ms[i] = uptime_ms
         self.kind[i] = kind
         self.msg[i] = msg
+        self.temp[i] = temp
+        self.hum[i] = hum
         self.head = (i + 1) % self.size
         if self.count < self.size:
             self.count += 1
-        if to_flash(kind):
-            return to_line(self.boot, uptime_ms, kind, msg)
+        if to_flash(kind, self.flash_kinds):
+            return to_line(self.boot, uptime_ms, kind, msg, temp, hum)
         return None
 
     def prune(self, now):
@@ -94,6 +133,6 @@ class EventLog:
         for n in range(min(self.count, limit)):
             i = (self.head - 1 - n) % self.size
             age = self.base_ms[i] + ticks_since(now, self.stamp[i])
-            out.append({"age_s": age // 1000, "boot": self.boot, "kind": self.kind[i], "msg": self.msg[i]})
+            out.append({"age_s": age // 1000, "boot": self.boot, "kind": self.kind[i], "msg": self.msg[i],
+                        "temp": _c(self.temp[i]), "hum": self.hum[i]})
         return out
-

@@ -23,7 +23,7 @@ class TestRing(unittest.TestCase):
         rows = log.export(at(5 * MIN), limit=3)
         self.assertEqual([r["msg"] for r in rows], ["m4", "m3", "m2"])
         self.assertEqual([r["age_s"] for r in rows], [60, 120, 180])
-        self.assertEqual(rows[0], {"age_s": 60, "boot": 3, "kind": t.EV_PHASE, "msg": "m4"})
+        self.assertEqual(rows[0], {"age_s": 60, "boot": 3, "kind": t.EV_PHASE, "msg": "m4", "temp": None, "hum": None})
         self.assertEqual(len(log.export(at(5 * MIN))), 5)
 
     def test_empty(self):
@@ -78,13 +78,52 @@ class TestFlash(unittest.TestCase):
     def test_line_round_trip(self):
         log = e.EventLog(boot=7)
         line = log.add(at(5 * MIN), 90500, t.EV_CYCLE_END, "too_hot ended")
-        self.assertEqual(json.loads(line), {"boot": 7, "up_s": 90, "kind": t.EV_CYCLE_END, "msg": "too_hot ended"})
-        self.assertEqual(e.from_line(line), {"age_s": None, "boot": 7, "kind": t.EV_CYCLE_END, "msg": "too_hot ended"})
+        self.assertEqual(
+            json.loads(line),
+            {"boot": 7, "up_s": 90, "kind": t.EV_CYCLE_END, "msg": "too_hot ended", "temp": None, "hum": None},
+        )
+        self.assertEqual(
+            e.from_line(line),
+            {"age_s": None, "boot": 7, "kind": t.EV_CYCLE_END, "msg": "too_hot ended", "temp": None, "hum": None},
+        )
         self.assertEqual(e.from_line(e.to_line(2, 0, t.EV_BOOT, "boot 2"))["kind"], t.EV_BOOT)
+
+    def test_reading_round_trip(self):
+        line = e.to_line(4, 61000, t.EV_WOULD, "would set dry, fan auto", 285, 81)
+        d = json.loads(line)
+        self.assertEqual((d["up_s"], d["temp"], d["hum"]), (61, 28.5, 81))
+        row = e.from_line(line)
+        self.assertEqual((row["temp"], row["hum"], row["msg"]), (28.5, 81, "would set dry, fan auto"))
+        self.assertEqual(e.from_line(e.to_line(4, 0, t.EV_WOULD, "m", -15, 5))["temp"], -1.5)
+
+    def test_old_line_without_reading(self):
+        # events.log lines written before M3.
+        row = e.from_line('{"boot": 3, "up_s": 9, "kind": "manual", "msg": "AC changed by hand"}')
+        self.assertEqual(row, {"age_s": None, "boot": 3, "kind": "manual", "msg": "AC changed by hand", "temp": None,
+                               "hum": None})
+
+    def test_shadow_kinds(self):
+        log = e.EventLog(boot=1, flash_kinds=e.SHADOW_FLASH_KINDS)
+        for kind in e.FLASH_KINDS + (t.EV_CYCLE_START, t.EV_PHASE, t.EV_WOULD, t.EV_HARD_CAP, t.EV_PROFILE,
+                                     t.EV_UNREACHABLE, t.EV_BLOCKED):
+            self.assertIsNotNone(log.add(at(0), 0, kind, "m"), kind)
+        for kind in (t.EV_PAUSE, t.EV_RESUME, t.EV_IGNORED, t.EV_LOW_MEMORY):
+            self.assertIsNone(log.add(at(0), 0, kind, "m"), kind)
+        self.assertIsNone(e.EventLog(boot=1).add(at(0), 0, t.EV_WOULD, "m"))  # the default is unchanged
+
+    def test_ring_keeps_readings(self):
+        log = e.EventLog(boot=2, size=2)
+        log.add(at(0), 0, t.EV_CYCLE_START, "a", 300, 70)
+        log.add(at(MIN), MIN, t.EV_WOULD, "b", 295, None)
+        log.add(at(2 * MIN), 2 * MIN, t.EV_PHASE, "c")  # overwrites "a": its reading must not stick
+        rows = log.export(at(2 * MIN))
+        self.assertEqual([(r["msg"], r["temp"], r["hum"]) for r in rows], [("c", None, None), ("b", 29.5, None)])
 
     def test_corrupt_line(self):
         for line in ('{"boot": 7, "up_s": 9, "kind": "boot", "ms', "", "[]", "null", '{"boot": 7}',
-                     '{"boot": "7", "up_s": 0, "kind": "boot", "msg": ""}'):
+                     '{"boot": "7", "up_s": 0, "kind": "boot", "msg": ""}',
+                     '{"boot": 7, "up_s": 0, "kind": "boot", "msg": "", "temp": "28"}',
+                     '{"boot": 7, "up_s": 0, "kind": "boot", "msg": "", "hum": true}'):
             self.assertIsNone(e.from_line(line), line)
 
 
