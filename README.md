@@ -4,8 +4,9 @@ A Raspberry Pi Pico 2 W that runs a Daikin room AC in short, purposeful cycles i
 It cools when the room is hot, dries when it is humid, always dries the coil afterwards, then switches the AC off.
 The remote always wins: when someone uses it, the Pico steps back.
 
-**Status: observer (M1).** The Pico reads the AC every minute and serves its state and a 24 h history, but never
-writes to it. Automation comes later; see the [roadmap](docs/roadmap.md).
+**Status: shadow mode (M3).** The Pico runs the real controller on real readings and logs what it *would* do, but
+never writes to the AC. The profile is picked on the status page. Automation comes later; see the
+[roadmap](docs/roadmap.md).
 
 ## How it works
 
@@ -60,8 +61,16 @@ Deploy options (`python3 tools/deploy.py ...`):
 app and its watchdog start, so files can be copied and device tests run (`mpremote run tests/device/<script>.py`).
 
 **Soak log**: `python3 tools/soak_log.py <pico-ip>` writes `/api/state` once a minute to a CSV in `local/`. The Pico
-also writes its free heap and largest block to `events.log` once an hour (over 8 days kept), so a long soak needs no
+also writes its free heap and largest block to `events.log` once an hour (over 9 days kept), so a long soak needs no
 computer: afterwards `tools/deploy.py --backup` copies the log off.
+
+**Shadow review**: `python3 tools/shadow_pull.py <pico-ip>` saves the Pico's flash event log (`GET /api/log`), its
+state and the 24 h history into `local/shadow/<time>/`; run it once a day. `--report` merges every pull and prints each
+decision with its local time, the reading it was made on and the room from 10 min before to 30 min after.
+
+The profile dropdown on the status page sends `POST /api/active`, which needs `API_TOKEN` from `secrets.py`: the page
+asks for it once and keeps it in the browser. With no `API_TOKEN` set, the Pico refuses every change. Pick a long
+random value, not the template's.
 
 ## Development
 

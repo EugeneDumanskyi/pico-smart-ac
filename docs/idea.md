@@ -324,14 +324,15 @@ Large responses (`/api/history`, the UI files) are streamed in chunks. Times are
 | `GET /` | | the page |
 | `GET /api/state` | | current state (below) |
 | `GET /api/history` | `?minutes=1440` | `{"step_s": 60, "last_age_s": 12, "temp": [...], "hum": [...], "out": [...], "mode": [...], "power": [...]}`, oldest first, null for gaps |
-| `GET /api/events` | `?limit=100` | `[{"age_s": 120, "boot": 7, "kind": "cycle_start", "msg": "..."}]` newest first; `age_s` is null for earlier boots |
+| `GET /api/events` | `?limit=100` | `[{"age_s": 120, "boot": 7, "kind": "cycle_start", "msg": "...", "temp": 28.5, "hum": 81}]` newest first, this boot's RAM ring; `temp` and `hum` are the reading the event was decided on (null if none) |
+| `GET /api/log` | | the flash event log as NDJSON, oldest first, earlier boots included: `{"boot": 7, "up_s": 5400, "kind": "would", "msg": "...", "temp": 28.5, "hum": 81}` per line (no `age_s`; lines from before M3 have no `temp`/`hum`) |
 | `GET /api/profiles` | | `profiles.json` |
 | `PUT /api/profiles` | whole document | `{"ok": true, "warnings": [...]}` or `{"ok": false, "errors": [...]}` |
 | `POST /api/profiles/validate` | whole document | same as PUT, but does not save |
 | `POST /api/profiles/reset` | | restores defaults |
 | `GET /api/settings` | | `settings.json` |
 | `PUT /api/settings` | whole document | as PUT profiles |
-| `POST /api/active` | `{"profile": "away", "cycle": "finish"}` (`cycle`: `finish` or `leave`, used only if a cycle runs) | new state |
+| `POST /api/active` | `{"profile": "away", "cycle": "finish"}` (`cycle`: `finish` or `leave`, used only if a cycle runs; default `finish`) | 202 and the state; the next tick applies it. 401 without the right token (always, if `API_TOKEN` is unset), 400 for an unknown profile or `cycle`, 503 if the action queue is full |
 | `POST /api/action` | `{"action": "pause", "minutes": 120, "cycle": "finish"}` (`minutes: null` = until resumed), `{"action": "resume"}`, `{"action": "run", "profile": "...", "rule": 0}`, `{"action": "stop"}`, `{"action": "stop_now"}`, `{"action": "clear_manual"}` | new state |
 | `POST /api/ac/test` | | AC reachability and fw version |
 
@@ -346,6 +347,8 @@ Large responses (`/api/history`, the UI files) are streamed in chunks. Times are
   "room": {"temp": 28, "hum": 81}, "outdoor_temp": 31.5,
   "ac": {"reachable": true, "power": true, "mode": "dry", "target_c": null, "fan": "auto"},
   "dry_run": false,
+  "shadow": false,
+  "profiles": [{"name": "away", "label": "Away"}, {"name": "day", "label": "Day"}, {"name": "night", "label": "Night"}],
   "last_error": null,
   "config_warning": null,
   "device": {"uptime_s": 86400, "boot": 7, "heap_free": 150000, "heap_max_block": 90000, "rssi": -60,
@@ -357,7 +360,7 @@ Large responses (`/api/history`, the UI files) are streamed in chunks. Times are
 - Ring buffer in RAM: 1440 one-minute samples × 5 values ≈ 10 KB. Lost on reboot (acceptable).
 - Events: last ~200 in RAM; only config saves, cycle summaries, overrides, takeovers, failed writes and reboots are
   also appended to a small rotating file on flash with the boot number (a few writes per day, so flash wear doesn't
-  matter).
+  matter). In shadow mode (M3) the decisions go there too (cycle start, phases, `would`), for the review.
 
 ## Later ideas (not in v1)
 

@@ -107,13 +107,34 @@ the Wi-Fi drop test (router restart) goes to M4's safety checklist, where the ow
 | | |
 |---|---|
 | Goal | Validate triggers and thresholds on real data with zero risk. |
-| Scope | M2 core on the Pico, `profiles.json`/`settings.json` from flash (edited by file copy), `dry_run`: commands become events (`would start "humid"`). |
+| Scope | M2 core on the Pico, `profiles.json`/`settings.json` from flash (edited by file copy), `dry_run`: commands become events (`would set dry, fan auto`). Brought forward from M5: `POST /api/active` (with the token) and a profile dropdown, `GET /api/events`; new: `GET /api/log` and `tools/shadow_pull.py`. |
 | Out of scope | Writes to the AC, editor UI. |
-| Deliverables | Shadow event log; a short tuning note in `idea.md` (thresholds, confirm reads). |
+| Deliverables | Shadow event log; `tools/shadow_pull.py`; a short tuning note in `idea.md` (thresholds, confirm reads). |
 | Done when | 7 nights of normal use in shadow mode; every "would" decision reviewed against the history and judged sensible; remote use correctly seen as "human". Doubles as the long soak (moved from M1): no unexplained reset, and the hourly `heap` lines in `events.log` flat over the week. |
 | Dependencies | M1, M2. |
 | Risks | Readings while off (S1) make triggers useless → external sensor moves into v1.0. |
 | Needs | Pico; real AC read only. |
+
+**Shadow mode** is `App(shadow=True)` (`main.py`): the controller gets `dry_run` forced on, whatever
+`settings.json` says, and so does a cycle restored from `state.json`. A write that still came out of the controller
+would not be sent: it becomes a `blocked` event, and `writes` stays 0. Decisions (`cycle_start`, `phase`, `would`,
+`hard_cap`, `profile`, `unreachable`, `blocked`) go to `events.log` as well as the RAM ring, each with the room temp and
+humidity it was made on, and `phase` and the last `would` say why a phase ended (`goal hum <= 65` or `45 min`). The log
+is 2 × 64 KB, at least 9 days.
+
+The week:
+1. `make test`, deploy; record the heap after boot and the `.mpy` size in `firmware.md`.
+2. Smoke test with the owner: enter the token on the phone, pick `night`; check `profile`, then `cycle_start` and
+   `would` when a trigger is met. A remote press while idle gives `manual: AC on, not started by us`, then
+   `takeover` and `would set …` once the hold is over. `writes` stays 0.
+3. Seven nights: `night` at bedtime, `day`/`away`/`off` by day as the owner likes, the remote used as usual.
+   `python3 tools/shadow_pull.py <pico-ip>` each morning; nothing else needs the Mac.
+4. Review with `--report`: each `would` against the history; remote use always seen as `manual`; the soak (one boot
+   or every reset explained, flat hourly `heap` lines, `writes` 0, no `blocked`). One boot crosses the ticks
+   half-period at about 6.2 days: watch the ages and timers there.
+5. Tuning note in `idea.md`, the soak result in `firmware.md`, M3 marked done here.
+
+M5 keeps the rest of the control API (`/api/action`, `/api/ac/test`) and the full Status tab.
 
 ## M4: Closed loop, supervised
 
@@ -133,7 +154,7 @@ the Wi-Fi drop test (router restart) goes to M4's safety checklist, where the ow
 | | |
 |---|---|
 | Goal | Day-to-day use from a phone. |
-| Scope | `POST /api/active`, `/api/action` (incl. finish/leave choice), `/api/ac/test`, `GET /api/events`; token from `secrets.py`; Status tab; events list; LED status. |
+| Scope | `/api/action` (incl. finish/leave choice), `/api/ac/test`; the finish/leave choice for `POST /api/active` in the UI (M3 brought the route, the token check, `GET /api/events` and a bare events list forward); Status tab; LED status. |
 | Out of scope | Profile editor, history chart. |
 | Deliverables | `web/` UI (vanilla JS), `tools/build_web.py`, API tests against the simulator. |
 | Done when | Every Status-tab button works on a phone against the Pico; requests without a token are refused; UI ≤ 60 KB gzipped. |

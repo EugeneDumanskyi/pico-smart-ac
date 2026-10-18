@@ -24,13 +24,13 @@ the plan is in [roadmap.md](roadmap.md). Decisions: [decisions/](decisions/).
 | `core/rules.py` | core | condition evaluation, first-match rule selection, `confirm_reads` counting, `min_interval` |
 | `core/controller.py` | core | state machine: `step(now, reading, actions) → commands`; owns cycle, stopping, cooldown, manual hold, takeover, pause |
 | `core/history.py` | core | 1440 × 1-min ring buffer in preallocated `array`s; streamed JSON export |
-| `core/events.py` | core | event ring (200), marks which events go to flash and owns the `events.log` line format |
+| `core/events.py` | core | event ring (200), each event with the reading it was decided on; marks which events go to flash (more in shadow mode) and owns the `events.log` line format |
 | `shell/daikin.py` | shell | async HTTP POST to `/dsiot/multireq`, hard timeout, one request at a time, IPv4 literal only (no DNS); never raises |
-| `shell/store.py` | shell | one API, two stores: `MemoryStore` (documents kept as JSON text) on the host, `FileStore` on flash (atomic `.tmp` → rename with `.bak`, rotating event log, crash log, boot and reset counters) |
+| `shell/store.py` | shell | one API, two stores: `MemoryStore` (documents kept as JSON text) on the host, `FileStore` on flash (atomic `.tmp` → rename with `.bak`, rotating event log read back in 512-byte pieces, crash log, boot and reset counters) |
 | `shell/net.py` | shell | Wi-Fi supervisor: reconnect with backoff, the unreachable-AC policy, counters; pure timing over the board and the app |
 | `shell/tasks.py` | shell | the watchdog and housekeeping tasks; `run()` starts all tasks and turns an uncaught exception into `crash.txt` and a reset |
 | `shell/api.py` | shell | Microdot routes from idea.md, token check, body size limit, streamed responses |
-| `shell/app.py` | shell | boot from the store, the control task, the action queue, `/api/state`; `_step` is the seam the runner watches. Observe mode (M1) builds no controller: a tick only reads and records history |
+| `shell/app.py` | shell | boot from the store, the control task, the action queue, `/api/state`; `_step` is the seam the runner watches. Observe mode (M1) builds no controller: a tick only reads and records history. Shadow mode (M3) forces `dry_run` on the controller and on a restored cycle, and a write that still comes out is logged as `blocked`, never sent |
 | `board/base.py` | shell | `Board` interface: ticks, `wait(event, ms)` (all sleeps go through it), Wi-Fi link, watchdog, LED, reset, reset cause |
 | `board/pico.py`, `board/host.py` | shell | real hardware / any clock plus a ticks offset, no-op hardware, and a sleep hook for virtual time on the Unix port |
 | `sim/clock.py` | sim | `FakeClock` (moves only when told, can start near the ticks wrap), `ScaledClock` (real time × speed); any callable returning ticks works as the clock |
@@ -66,7 +66,7 @@ read-modify-write of shared state, no `_thread` / second core.
                 │                                  │
                 │                                  ├─ events ──▶ events ring ──▶ store (selected)
                 ├─ sample ──▶ history ring         └─ snapshot ──▶ store (on transitions only)
-                └─ state snapshot ──▶ http (GET /api/state, /api/history, /api/events)
+                └─ state snapshot ──▶ http (GET /api/state, /api/history, /api/events, /api/log)
  config files ◀── store ◀── http (PUT, after core/config.validate) ── new rules apply from the next cycle
 ```
 
@@ -82,7 +82,7 @@ didn't set → `MANUAL`; while a write is pending, the unchanged previous state 
 |---|---|---|
 | `profiles.json`, `settings.json` (+ `.bak`) | user saves | ~0 |
 | `state.json` (cycle owner, expected AC state, pause, boot counter) | state transitions only | ≤ 50 |
-| `events.log` (rotating, 2 × 16 KB; boot counter + uptime, no timestamps) | cycle end, config save, override, takeover, failed write, reboot; an hourly `heap` line | ≤ 75 |
+| `events.log` (rotating, 2 × 64 KB; boot counter, uptime and the reading, no timestamps) | cycle end, config save, override, takeover, failed write, reboot; an hourly `heap` line. Shadow mode adds cycle start, phase, would, hard cap, profile, unreachable, blocked | ≤ 75 (shadow ≤ 150) |
 | `crash.txt` (the last traceback) | after an uncaught exception | ~0 |
 | `boot.json`, `resets.json` (+ `.bak`) | once per boot: boot counter, resets by cause | a few |
 | `reset_reason.txt` | just before a deliberate reset; read and removed at the next boot | ~0 |
@@ -93,7 +93,8 @@ so ~100 small writes/day is negligible for the 2.5 MB file system.
 
 `FileStore` saves `name.json` by writing `name.json.tmp`, moving the old file to `name.json.bak`, then the `.tmp` into
 place (littlefs `rename` replaces the target; checked on the device). A power cut leaves one of them whole, and `load`
-falls back to the `.bak`. `events.log` moves to `events.1.log` when the next line would pass 16 KB.
+falls back to the `.bak`. `events.log` moves to `events.1.log` when the next line would pass 64 KB. `GET /api/log`
+streams both files, oldest first, opening the file for each 512-byte piece so no handle stays open across an await.
 
 **Reset causes.** On the RP2350 `machine.reset()` reports `WDT_RESET`, the same as a real watchdog reset. So every
 deliberate reset (`wifi_down`, `ac_silent`, `crash`, `deploy`) first writes its reason to `reset_reason.txt`; the next
@@ -182,7 +183,7 @@ tests/unit/              core tests, unittest style
 tests/golden/            JSON fixtures: config + sensor trace → expected commands
 tests/integration/       full app against the simulator
 tests/device/            scripts run on the Pico with mpremote
-tools/                   daikin_status.py, daikin_check.py, deploy.py, soak_log.py (build_web.py later)
+tools/                   daikin_status.py, daikin_check.py, deploy.py, soak_log.py, shadow_pull.py (build_web.py later)
 build/                   deploy.py's .mpy output (gitignored)
 local/                   owner's backups of settings/profiles (gitignored)
 docs/
