@@ -4,6 +4,11 @@ import json
 import os
 import unittest
 
+from sim.clock import FakeClock
+from smartac.board.host import HostBoard
+from smartac.core import config
+from smartac.shell import store as store_module
+from smartac.shell.app import App
 from smartac.shell.store import EVENT_LOG_BYTES, MAX_CRASH, READ_CHUNK, FileStore
 
 MOUNT = "/smartac_test_lfs"
@@ -55,6 +60,55 @@ def _read(path):
 def _write(path, text):
     with open(path, "w") as f:
         f.write(text)
+
+
+class PowerCut(Exception):
+    pass
+
+
+class _CutOs:
+    # The store's view of os: the rename numbered `at` (1: name.json -> .bak, 2: .tmp -> name.json) never happens.
+    def __init__(self, at):
+        self.at = at
+        self.renames = 0
+
+    def rename(self, a, b):
+        self.renames += 1
+        if self.renames == self.at:
+            raise PowerCut()
+        os.rename(a, b)
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+def _cut_open(path, mode="r"):
+    # A write that stops halfway through, as a power cut leaves a file.
+    f = open(path, mode)
+    if "w" not in mode:
+        return f
+
+    class Half:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            f.close()
+
+        def write(self, text):
+            f.write(text[: len(text) // 2])
+            raise PowerCut()
+
+    return Half()
+
+
+def _profiles(label):
+    doc = config.default_profiles()
+    doc["profiles"]["day"]["label"] = label
+    return doc
+
+
+CUTS = ("write", "rename 1", "rename 2", None)  # None: the save completes
 
 
 class Cases:
@@ -157,6 +211,46 @@ class Cases:
         _write(self.root + "/resets.json", '{"crash": "x", "watchdog": 3}')
         os.remove(self.root + "/resets.json.bak")
         self.assertEqual(s.reset_counts("crash"), {"crash": 1, "watchdog": 3})
+
+    def save_with_cut(self, s, doc, cut):
+        if cut == "write":
+            store_module.open = _cut_open
+        elif cut is not None:
+            store_module.os = _CutOs(int(cut[-1]))
+        try:
+            s.save("profiles", doc)
+        except PowerCut:
+            pass
+        finally:
+            store_module.os = os
+            if hasattr(store_module, "open"):
+                del store_module.open
+
+    def boot(self):
+        app = App(HostBoard(clock=FakeClock()), FileStore(self.root), "192.0.2.10", shadow=True)
+        return app.controller.profiles["profiles"]["day"]["label"], app.warnings
+
+    def test_power_cut_at_each_point_of_a_save(self):
+        # Whatever point the power is cut at, the next boot loads the old document or the new one: never the one
+        # before (in .bak), never the defaults.
+        for cut in CUTS:
+            for name in os.listdir(self.root):
+                os.remove(self.root + "/" + name)
+            s = FileStore(self.root)
+            s.save("profiles", _profiles("Older"))
+            s.save("profiles", _profiles("Old"))
+            self.save_with_cut(s, _profiles("New"), cut)
+            label, warnings = self.boot()
+            self.assertEqual(warnings, [], cut)
+            self.assertEqual(label, "New" if cut is None else "Old", cut)
+            # And the next save works from whatever the cut left.
+            FileStore(self.root).save("profiles", _profiles("Next"))
+            self.assertEqual(self.boot(), ("Next", []), cut)
+
+    def test_power_cut_on_the_first_save(self):
+        for cut in CUTS[:2]:
+            self.save_with_cut(FileStore(self.root), _profiles("New"), cut)
+            self.assertEqual(self.boot(), ("Day", []), cut)  # no file yet: the defaults, no warning
 
     def test_root_with_trailing_slash(self):
         FileStore(self.root + "/").save("boot", {"count": 1})
