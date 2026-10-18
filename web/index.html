@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
-<!-- Bare status page (M1): polls /api/state every 5 s. No build step yet; deploy copies it to :www/index.html. -->
+<!-- Status page (M3): polls /api/state and the last events every 5 s; the profile dropdown sends POST /api/active.
+     No build step yet; deploy copies it to :www/index.html. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -21,18 +22,33 @@
   td { padding: 4px 0; border-top: 1px solid var(--line); vertical-align: top; }
   td:first-child { color: var(--dim); width: 40%; }
   #err { color: var(--bad); min-height: 1.4em; }
+  .badge { font-size: .75rem; font-weight: 600; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--dim);
+           color: var(--dim); vertical-align: 2px; }
+  .ctl { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  select { font: inherit; padding: 4px 6px; }
+  #cycle { margin: 0 0 12px; }
+  h2 { font-size: .9rem; font-weight: 600; margin: 20px 0 4px; color: var(--dim); }
+  #events td:first-child { width: 4.5em; }
+  #events small { color: var(--dim); }
 </style>
 </head>
 <body>
 <main>
-  <h1>smartac <span id="state"></span></h1>
+  <h1>smartac <span id="state"></span> <span id="shadow" class="badge" hidden>shadow</span></h1>
   <div class="big">
     <div><small>room</small><span id="temp">–</span></div>
     <div><small>humidity</small><span id="hum">–</span></div>
     <div><small>outdoor</small><span id="out">–</span></div>
   </div>
+  <div class="ctl">
+    <label>profile <select id="profile" disabled></select></label>
+    <span id="sent"></span>
+  </div>
+  <p id="cycle"></p>
   <p id="err"></p>
   <table id="rows"></table>
+  <h2>events</h2>
+  <table id="events"></table>
 </main>
 <script>
 "use strict";
@@ -44,10 +60,90 @@ const dur = (s) => {
   return (d ? d + " d " : "") + (d || h ? h + " h " : "") + m + " min";
 };
 const kb = (b) => (b == null ? "–" : Math.round(b / 1024) + " KB");
+const mins = (s) => (s == null ? "–" : Math.ceil(s / 60) + " min");
+const clock = (age) => new Date(Date.now() - age * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const TOKEN_KEY = "smartac.token";
+
+function store(get, value) {
+  // localStorage may be missing or blocked (private mode): then the token is asked for each time.
+  try {
+    if (get) return localStorage.getItem(TOKEN_KEY);
+    if (value == null) localStorage.removeItem(TOKEN_KEY); else localStorage.setItem(TOKEN_KEY, value);
+  } catch (e) { /* not kept */ }
+  return null;
+}
+
+function rows(table, list) {
+  table.replaceChildren(...list.map((cells) => {
+    const tr = document.createElement("tr");
+    for (const c of cells) {
+      const td = document.createElement("td");
+      if (c instanceof Node) td.append(c); else td.textContent = c;
+      tr.append(td);
+    }
+    return tr;
+  }));
+}
+
+function cycleText(s) {
+  const c = s.cycle;
+  if (s.booting) return "starting: waiting for the first AC read";
+  if (s.state === "RUNNING" || s.state === "TAKEOVER") {
+    const name = c.rule || "takeover";
+    return name + ": phase " + c.phase + "/" + c.phases + " " + c.mode + ", " + mins(c.phase_left_s) + " left"
+      + (c.goal ? ", until " + c.goal : "");
+  }
+  if (s.state === "STOPPING") return (c.rule || "takeover") + ": switching off";
+  if (s.state === "COOLDOWN") return "cooldown, " + mins(s.cooldown_left_s) + " left";
+  if (s.state === "MANUAL") return "hands off (AC set by hand), " + mins(s.manual_left_s) + " until takeover";
+  if (s.state === "PAUSED") return s.paused_left_s == null ? "paused until resumed" : "paused, " + mins(s.paused_left_s) + " left";
+  if (s.state === "IDLE") return s.profile === "off" ? "off: nothing runs" : "idle, watching the room";
+  return "";
+}
+
+function renderProfiles(s) {
+  const sel = $("profile");
+  if (s.state === "OBSERVE") { sel.disabled = true; return; }
+  const names = ["off", ...s.profiles.map((p) => p.name)];
+  const key = names.join(",");
+  if (sel.dataset.key !== key) {
+    sel.replaceChildren(...[{ name: "off", label: "Off" }, ...s.profiles].map((p) => new Option(p.label, p.name)));
+    sel.dataset.key = key;
+  }
+  if (document.activeElement !== sel && !sel.dataset.busy) sel.value = s.profile;
+  sel.disabled = false;
+}
+
+async function setProfile(name) {
+  const sel = $("profile");
+  let token = store(true);
+  if (!token) token = prompt("API token (API_TOKEN in secrets.py)");
+  if (!token) { poll(); return; }
+  sel.dataset.busy = "1";
+  $("sent").textContent = "sending…";
+  try {
+    const r = await fetch("/api/active", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Token": token },
+      body: JSON.stringify({ profile: name, cycle: "finish" }),
+    });
+    if (r.status === 401) { store(false, null); throw new Error("wrong token"); }
+    if (!r.ok) throw new Error((await r.json()).error || "HTTP " + r.status);
+    store(false, token);
+    $("sent").textContent = "";
+  } catch (e) {
+    $("sent").textContent = "not changed: " + e.message;
+  }
+  delete sel.dataset.busy;
+  poll();
+}
 
 function render(s) {
   const ac = s.ac, d = s.device;
   $("state").textContent = s.state;
+  $("shadow").hidden = !s.shadow;
+  $("cycle").textContent = cycleText(s);
+  renderProfiles(s);
   $("temp").textContent = deg(s.room.temp);
   $("hum").textContent = s.room.hum == null ? "–" : s.room.hum + " %";
   $("out").textContent = deg(s.outdoor_temp);
@@ -58,9 +154,9 @@ function render(s) {
     : (ac.power ? "on" : "off") + ", " + ac.mode + (ac.target_c != null ? " " + ac.target_c + " °C" : "")
       + (ac.fan ? ", fan " + ac.fan : "");
   const resets = Object.entries(d.resets || {}).map(([k, v]) => k + " " + v).join(", ");
-  const rows = [
+  const info = [
     ["AC", acText],
-    ["reads", s.reads + " (" + s.read_errors + " failed)"],
+    ["reads", s.reads + " (" + s.read_errors + " failed), writes " + s.writes],
     ["uptime", dur(d.uptime_s)],
     ["boot", d.boot + " (" + d.reset_cause + ")"],
     ["resets", resets || "–"],
@@ -70,28 +166,35 @@ function render(s) {
       + ", reconnects " + d.wifi_reconnects + ", for the AC " + d.ac_reconnects],
     ["firmware", d.fw],
   ];
-  const t = $("rows");
-  t.replaceChildren(...rows.map(([k, v]) => {
-    const tr = document.createElement("tr");
-    for (const text of [k, v]) {
-      const td = document.createElement("td");
-      td.textContent = text;
-      tr.append(td);
-    }
-    return tr;
+  rows($("rows"), info);
+}
+
+function renderEvents(list) {
+  rows($("events"), list.map((e) => {
+    const msg = document.createElement("span");
+    msg.textContent = e.kind + ": " + e.msg + " ";
+    const room = document.createElement("small");
+    room.textContent = e.temp == null ? "" : e.temp.toFixed(1) + " °C " + (e.hum == null ? "" : e.hum + " %");
+    msg.append(room);
+    return [e.age_s == null ? "–" : clock(e.age_s), msg];
   }));
 }
 
+let timer = null;
 async function poll() {
+  clearTimeout(timer);
   try {
     const r = await fetch("/api/state", { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     render(await r.json());
+    const e = await fetch("/api/events?limit=15", { cache: "no-store" });
+    if (e.ok) renderEvents(await e.json());
   } catch (e) {
     $("err").textContent = "Pico not reachable (" + e.message + ")";
   }
-  setTimeout(poll, 5000);
+  timer = setTimeout(poll, 5000);
 }
+$("profile").addEventListener("change", (ev) => setProfile(ev.target.value));
 poll();
 </script>
 </body>
