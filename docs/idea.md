@@ -326,15 +326,29 @@ Large responses (`/api/history`, the UI files) are streamed in chunks. Times are
 | `GET /api/history` | `?minutes=1440` | `{"step_s": 60, "last_age_s": 12, "temp": [...], "hum": [...], "out": [...], "mode": [...], "power": [...]}`, oldest first, null for gaps |
 | `GET /api/events` | `?limit=100` | `[{"age_s": 120, "boot": 7, "kind": "cycle_start", "msg": "...", "temp": 28.5, "hum": 81}]` newest first, this boot's RAM ring; `temp` and `hum` are the reading the event was decided on (null if none) |
 | `GET /api/log` | | the flash event log as NDJSON, oldest first, earlier boots included: `{"boot": 7, "up_s": 5400, "kind": "would", "msg": "...", "temp": 28.5, "hum": 81}` per line (no `age_s`; lines from before M3 have no `temp`/`hum`) |
-| `GET /api/profiles` | | `profiles.json` |
-| `PUT /api/profiles` | whole document | `{"ok": true, "warnings": [...]}` or `{"ok": false, "errors": [...]}` |
+| `GET /api/profiles` | | `profiles.json` as the next tick runs it (a saved one before that tick applies it), `active` the controller's |
+| `PUT /api/profiles` | whole document | 200 `{"ok": true, "warnings": [...]}` or 400 `{"ok": false, "errors": [...]}`; saved at once, applied by the next tick |
 | `POST /api/profiles/validate` | whole document | same as PUT, but does not save |
-| `POST /api/profiles/reset` | | restores defaults |
-| `GET /api/settings` | | `settings.json` |
+| `POST /api/profiles/reset` | | restores defaults, as PUT |
+| `GET /api/settings` | | `settings.json` (in shadow mode the saved `dry_run`, not the forced one) |
 | `PUT /api/settings` | whole document | as PUT profiles |
 | `POST /api/active` | `{"profile": "away", "cycle": "finish"}` (`cycle`: `finish` or `leave`, used only if a cycle runs; default `finish`) | 202 and the state; the next tick applies it. 401 without the right token (always, if `API_TOKEN` is unset), 400 for an unknown profile or `cycle`, 503 if the action queue is full |
 | `POST /api/action` | `{"action": "pause", "minutes": 120, "cycle": "finish"}` (`minutes: null` = until resumed), `{"action": "resume"}`, `{"action": "run", "profile": "...", "rule": 0}`, `{"action": "stop"}`, `{"action": "stop_now"}`, `{"action": "clear_manual"}` | new state |
 | `POST /api/ac/test` | | AC reachability and fw version |
+
+Config documents (`/api/profiles`, `/api/settings`):
+- Every POST and PUT needs the token, `/validate` included; the GETs are open.
+- `active` is not changed by a save: the server puts the controller's current profile in, and deleting or renaming
+  that profile is an error on `profiles.<name>` ("the active profile; switch first"). Profiles change with
+  `POST /api/active`.
+- Restore defaults keeps the active profile if it is a default one; otherwise the next tick switches to `off`
+  (`finish`). The same happens if a switch to a profile races a save that removes it.
+- A save is written to flash at once (`.tmp`, `.bak`, rename) and parked; the next tick (woken at once) applies it.
+  A running cycle keeps the copy of its rule and the hard cap it started with; the next cycle uses the new rules.
+  A new `ac_ip` gets a new client, and "the AC answered this boot" starts over, so a wrong address shows as
+  unreachable and never leads to the net task's reset.
+- A body over 17 KB → 413; one save at a time (a second one while a body is read → 503); a body that isn't JSON
+  → 400 with the error on `$`. In observe mode (no controller) the profiles routes give 409.
 
 `/api/state` example:
 ```json

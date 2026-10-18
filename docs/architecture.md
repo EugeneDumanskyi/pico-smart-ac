@@ -29,8 +29,8 @@ the plan is in [roadmap.md](roadmap.md). Decisions: [decisions/](decisions/).
 | `shell/store.py` | shell | one API, two stores: `MemoryStore` (documents kept as JSON text) on the host, `FileStore` on flash (atomic `.tmp` → rename with `.bak`, rotating event log read back in 512-byte pieces, crash log, boot and reset counters) |
 | `shell/net.py` | shell | Wi-Fi supervisor: reconnect with backoff, the unreachable-AC policy, counters; pure timing over the board and the app |
 | `shell/tasks.py` | shell | the watchdog and housekeeping tasks; `run()` starts all tasks and turns an uncaught exception into `crash.txt` and a reset |
-| `shell/api.py` | shell | Microdot routes from idea.md, token check, body size limit, streamed responses |
-| `shell/app.py` | shell | boot from the store, the control task, the action queue, `/api/state`; `_step` is the seam the runner watches. Observe mode (M1) builds no controller: a tick only reads and records history. Shadow mode (M3) forces `dry_run` on the controller and on a restored cycle, and a write that still comes out is logged as `blocked`, never sent |
+| `shell/api.py` | shell | Microdot routes from idea.md, token check, body size limits (config documents read from the stream after the token check, one at a time), streamed responses |
+| `shell/app.py` | shell | boot from the store, the control task, the action queue, `/api/state`; `_step` is the seam the runner watches. Observe mode (M1) builds no controller: a tick only reads and records history. Shadow mode (M3) forces `dry_run` on the controller and on a restored cycle, and a write that still comes out is logged as `blocked`, never sent. Config saves (M6): validate, save to the store, park in `pending` for the next tick |
 | `board/base.py` | shell | `Board` interface: ticks, `wait(event, ms)` (all sleeps go through it), Wi-Fi link, watchdog, LED, reset, reset cause |
 | `board/pico.py`, `board/host.py` | shell | real hardware / any clock plus a ticks offset, no-op hardware, and a sleep hook for virtual time on the Unix port |
 | `sim/clock.py` | sim | `FakeClock` (moves only when told, can start near the ticks wrap), `ScaledClock` (real time × speed); any callable returning ticks works as the clock |
@@ -39,7 +39,9 @@ the plan is in [roadmap.md](roadmap.md). Decisions: [decisions/](decisions/).
 | `sim/server.py`, `sim/run.py` | sim | minimal HTTP/1.1 on 127.0.0.1 (one request per connection); standalone runner for manual pokes |
 | `sim/scenario.py` | sim | a long run generated from a seed: room, remote presses, outages, failing writes (device script); actions and power cuts (runner timeline) |
 | `sim/harness.py` | sim | the month run: the app against the simulator in virtual time, invariants checked after every step |
-| `www/` | assets | single-page UI (vanilla JS, no framework, no CDN), gzipped at build time |
+| `sim/dev.py` | sim | `make dev`: fake Daikin, the app in shadow mode on a `FileStore` in a given directory, the API on 127.0.0.1:8080 serving `web/` with token `dev`, scaled time; for work on the page in a desktop browser |
+| `web/index.html` | assets | the page: tabs (hash routing), Status, shared helpers (`api()` with the token) |
+| `web/editor.js` | assets | Profiles and Settings tabs: one render function per level, inputs tagged with the server's error paths |
 
 Logging: user-facing **events** (ring in RAM, cycle summaries and config saves appended to flash),
 **debug log** to USB serial with a level setting, **crash log** (last exception + reset cause, one small file).
@@ -67,8 +69,15 @@ read-modify-write of shared state, no `_thread` / second core.
                 │                                  ├─ events ──▶ events ring ──▶ store (selected)
                 ├─ sample ──▶ history ring         └─ snapshot ──▶ store (on transitions only)
                 └─ state snapshot ──▶ http (GET /api/state, /api/history, /api/events, /api/log)
- config files ◀── store ◀── http (PUT, after core/config.validate) ── new rules apply from the next cycle
+ config files ◀── store ◀── http (PUT, after core/config.validate) ──▶ app.pending ──▶ control (next tick:
+                                                                     controller.configure, new client if ac_ip changed)
 ```
+
+A saved document reaches the flash before the reply, and the controller only at the start of the next tick (woken at
+once), so only the control task touches the controller and the AC client. A running cycle keeps the copy of its rule
+it took at the start; new rules apply from the next cycle. If the active profile is gone after a save (Restore
+defaults, or a switch that raced the save), that tick switches to `off` with `finish`. A tick that switches profiles
+rewrites `profiles.json` from the parked document, so a save waiting for its tick is never overwritten.
 
 One control tick: read AC (this read is also the "read before write"), step, write at most one target state,
 wait ~5 s, read back. The read-back goes to `step(..., readback=True)`, which only confirms the write or counts a
@@ -174,9 +183,9 @@ src/                     copied to the Pico root (as .mpy, except main.py)
   smartac/shell/         async adapters
   smartac/board/         hardware interface + implementations
   lib/microdot/          vendored, pinned (docs/firmware.md)
-web/                     UI sources; deployed to :www/ (index.html as is until the web build exists)
+web/                     UI sources: index.html, editor.js; deployed to :www/ as they are until the web build exists
 sim/                     fake Daikin + room model (MicroPython, Unix port): clock, room, device, server, run.py;
-                         scenario.py + harness.py (the month run)
+                         scenario.py + harness.py (the month run); dev.py (make dev, for the page)
 tests/run.py             test runner (Unix port)
 tests/lib/               vendored micropython-lib unittest
 tests/unit/              core tests, unittest style

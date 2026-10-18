@@ -175,6 +175,17 @@ M5 keeps the rest of the control API (`/api/action`, `/api/ac/test`) and the ful
 | Risks | Editor size and complexity (keep one form component per level). |
 | Needs | host + simulator; Pico for acceptance. |
 
+M6 is built on the host first, on the branch `m6-editor`, while M3's week runs on the Pico (deploying reboots it).
+Done so far (2026-10-18): a table test with one accepted and one rejected change per row of idea.md's "Validation"
+table; the app's save path (`pending`, applied by the next tick; `config_saved` events; shadow mode keeps the
+owner's `dry_run` in the file); the routes (idea.md, "HTTP API"); power cuts injected at each point of
+`FileStore.save`, each followed by a clean boot on the old or new document; `make dev`; the Profiles and Settings tabs,
+checked in headless Chrome at phone width (each kind of error marks its field or block, save, revert, restore
+defaults, rename, copy a rule). Page size: about 39 KB before gzip.
+
+Left, after M3's week is reviewed: deploy; heap during a 16 KB PUT and the new sizes in `firmware.md`; the phone
+checklist; `tests/device/save_check.py` with about 5 USB pulls mid-save; then merge to `main`.
+
 ## M7: v1.0
 
 | | |
