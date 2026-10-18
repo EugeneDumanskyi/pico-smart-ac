@@ -1,20 +1,26 @@
 <!DOCTYPE html>
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
-<!-- Status page (M3): polls /api/state and the last events every 5 s; the profile dropdown sends POST /api/active.
-     No build step yet; deploy copies it to :www/index.html. -->
+<!-- The page: tabs Status, Profiles, Settings (hash routing). Status polls /api/state and the last events every 5 s;
+     the profile dropdown sends POST /api/active. The Profiles and Settings forms are in editor.js, which uses the
+     helpers below ($, rows, store, api) and the "state" event. No build step yet; deploy copies both files to :www. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>smartac</title>
 <style>
-  :root { color-scheme: light dark; --fg: #1b1b1b; --bg: #fafafa; --dim: #6b6b6b; --line: #ddd; --bad: #b3261e; }
+  :root { color-scheme: light dark; --fg: #1b1b1b; --bg: #fafafa; --dim: #6b6b6b; --line: #ddd; --bad: #b3261e;
+          --warn: #8a5a00; --box: #fff; --accent: #2b5fb3; }
   @media (prefers-color-scheme: dark) {
-    :root { --fg: #e8e8e8; --bg: #161616; --dim: #9a9a9a; --line: #333; --bad: #f2867e; }
+    :root { --fg: #e8e8e8; --bg: #161616; --dim: #9a9a9a; --line: #333; --bad: #f2867e; --warn: #e0b04f;
+            --box: #1f1f1f; --accent: #8fb4f0; }
   }
   body { margin: 0; padding: 16px; font: 16px/1.4 system-ui, sans-serif; color: var(--fg); background: var(--bg); }
-  main { max-width: 32rem; margin: 0 auto; }
-  h1 { font-size: 1rem; font-weight: 600; margin: 0 0 12px; }
+  main { max-width: 34rem; margin: 0 auto; }
+  h1 { font-size: 1rem; font-weight: 600; margin: 0 0 8px; }
+  nav { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+  nav a { padding: 6px 12px; color: var(--dim); text-decoration: none; border-bottom: 2px solid transparent; }
+  nav a.on { color: var(--fg); border-bottom-color: var(--accent); }
   .big { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; }
   .big div { font-size: 2rem; font-variant-numeric: tabular-nums; }
   .big small { display: block; font-size: .8rem; color: var(--dim); }
@@ -25,30 +31,71 @@
   .badge { font-size: .75rem; font-weight: 600; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--dim);
            color: var(--dim); vertical-align: 2px; }
   .ctl { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
-  select { font: inherit; padding: 4px 6px; }
+  select, input, button { font: inherit; }
+  select, input { padding: 4px 6px; }
   #cycle { margin: 0 0 12px; }
   h2 { font-size: .9rem; font-weight: 600; margin: 20px 0 4px; color: var(--dim); }
-  #events td:first-child { width: 4.5em; }
+  #events td:first-child { width: 5.5em; }
   #events small { color: var(--dim); }
+  /* editor (editor.js) */
+  .card { background: var(--box); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+  details > summary { cursor: pointer; padding: 2px 0; }
+  details > summary b { font-weight: 600; }
+  .sum { color: var(--dim); font-size: .9rem; margin: 2px 0 6px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: flex-end; }
+  .f { display: inline-flex; flex-direction: column; font-size: .8rem; color: var(--dim); }
+  .f > span { white-space: nowrap; }
+  .f .in { display: flex; }
+  .f input[type=number] { width: 4.2em; text-align: right; }
+  .f input[type=text] { width: 9em; }
+  .f input.wide { width: 14em; }
+  .f input, .f select { color: var(--fg); font-size: 1rem; }
+  .step { min-width: 2em; padding: 0; }
+  .sep { align-self: center; padding: 0 6px; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
+  .tools { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+  .tools button, .row button { padding: 2px 8px; }
+  .phase { border-left: 3px solid var(--line); padding: 2px 0 2px 8px; margin: 6px 0; }
+  .bad > input, .bad > select, .bad .in input, input.bad, select.bad { outline: 2px solid var(--bad); }
+  .card.bad, .phase.bad, div.bad { border-color: var(--bad); }
+  .warn > input, .warn .in input, input.warn { outline: 2px solid var(--warn); }
+  .msg { display: block; color: var(--bad); font-size: .8rem; margin: 2px 0; }
+  .msg.w { color: var(--warn); }
+  .bar { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); padding: 8px 0;
+         margin-top: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .bar .note { color: var(--dim); font-size: .9rem; flex: 1 1 10em; }
+  .bar .note.bad { color: var(--bad); }
+  .primary { font-weight: 600; }
+  .lock { color: var(--dim); font-size: .8rem; }
+  .hint { color: var(--dim); font-size: .85rem; margin: 4px 0 8px; }
 </style>
 </head>
 <body>
 <main>
   <h1>smartac <span id="state"></span> <span id="shadow" class="badge" hidden>shadow</span></h1>
-  <div class="big">
-    <div><small>room</small><span id="temp">–</span></div>
-    <div><small>humidity</small><span id="hum">–</span></div>
-    <div><small>outdoor</small><span id="out">–</span></div>
-  </div>
-  <div class="ctl">
-    <label>profile <select id="profile" disabled></select></label>
-    <span id="sent"></span>
-  </div>
-  <p id="cycle"></p>
-  <p id="err"></p>
-  <table id="rows"></table>
-  <h2>events</h2>
-  <table id="events"></table>
+  <nav id="tabs"><a href="#status">Status</a><a href="#profiles">Profiles</a><a href="#settings">Settings</a></nav>
+  <section id="status">
+    <div class="big">
+      <div><small>room</small><span id="temp">–</span></div>
+      <div><small>humidity</small><span id="hum">–</span></div>
+      <div><small>outdoor</small><span id="out">–</span></div>
+    </div>
+    <div class="ctl">
+      <label>profile <select id="profile" disabled></select></label>
+      <span id="sent"></span>
+    </div>
+    <p id="cycle"></p>
+    <p id="err"></p>
+    <table id="rows"></table>
+    <h2>events</h2>
+    <table id="events"></table>
+  </section>
+  <section id="profiles" hidden></section>
+  <section id="settings" hidden>
+    <div id="settings-form"></div>
+    <h2>device</h2>
+    <table id="device"></table>
+  </section>
 </main>
 <script>
 "use strict";
@@ -63,6 +110,7 @@ const kb = (b) => (b == null ? "–" : Math.round(b / 1024) + " KB");
 const mins = (s) => (s == null ? "–" : Math.ceil(s / 60) + " min");
 const clock = (age) => new Date(Date.now() - age * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const TOKEN_KEY = "smartac.token";
+const TABS = ["status", "profiles", "settings"];
 
 function store(get, value) {
   // localStorage may be missing or blocked (private mode): then the token is asked for each time.
@@ -71,6 +119,24 @@ function store(get, value) {
     if (value == null) localStorage.removeItem(TOKEN_KEY); else localStorage.setItem(TOKEN_KEY, value);
   } catch (e) { /* not kept */ }
   return null;
+}
+
+async function api(method, path, body, ask = true) {
+  // A request that needs the token. -> {status, data}; throws on a network error, a wrong or missing token.
+  // ask: prompt for a token that isn't stored yet (false: give up quietly, e.g. a background validation).
+  let token = store(true);
+  if (!token && ask) token = prompt("API token (API_TOKEN in secrets.py)");
+  if (!token) throw new Error("no token");
+  const r = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json", "X-Token": token },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (r.status === 401) { store(false, null); throw new Error("wrong token"); }
+  store(false, token);
+  let data = null;
+  try { data = await r.json(); } catch (e) { /* no JSON body */ }
+  return { status: r.status, data };
 }
 
 function rows(table, list) {
@@ -83,6 +149,13 @@ function rows(table, list) {
     }
     return tr;
   }));
+}
+
+function showTab() {
+  const tab = TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "status";
+  for (const t of TABS) $(t).hidden = t !== tab;
+  for (const a of $("tabs").children) a.classList.toggle("on", a.hash === "#" + tab);
+  document.dispatchEvent(new CustomEvent("tab", { detail: tab }));
 }
 
 function cycleText(s) {
@@ -116,20 +189,11 @@ function renderProfiles(s) {
 
 async function setProfile(name) {
   const sel = $("profile");
-  let token = store(true);
-  if (!token) token = prompt("API token (API_TOKEN in secrets.py)");
-  if (!token) { poll(); return; }
   sel.dataset.busy = "1";
   $("sent").textContent = "sending…";
   try {
-    const r = await fetch("/api/active", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Token": token },
-      body: JSON.stringify({ profile: name, cycle: "finish" }),
-    });
-    if (r.status === 401) { store(false, null); throw new Error("wrong token"); }
-    if (!r.ok) throw new Error((await r.json()).error || "HTTP " + r.status);
-    store(false, token);
+    const r = await api("POST", "/api/active", { profile: name, cycle: "finish" });
+    if (r.status !== 202) throw new Error((r.data && r.data.error) || "HTTP " + r.status);
     $("sent").textContent = "";
   } catch (e) {
     $("sent").textContent = "not changed: " + e.message;
@@ -138,8 +202,18 @@ async function setProfile(name) {
   poll();
 }
 
+function acText(s) {
+  const ac = s.ac;
+  if (!ac.reachable) {
+    return "unreachable" + (s.unreachable_s != null ? " for " + dur(s.unreachable_s) : "")
+      + (s.last_error ? " (" + s.last_error + ")" : "");
+  }
+  return (ac.power ? "on" : "off") + ", " + ac.mode + (ac.target_c != null ? " " + ac.target_c + " °C" : "")
+    + (ac.fan ? ", fan " + ac.fan : "");
+}
+
 function render(s) {
-  const ac = s.ac, d = s.device;
+  const d = s.device;
   $("state").textContent = s.state;
   $("shadow").hidden = !s.shadow;
   $("cycle").textContent = cycleText(s);
@@ -150,23 +224,24 @@ function render(s) {
   $("err").textContent = s.unreachable_s != null
     ? "AC not reachable for " + dur(s.unreachable_s) + (s.last_error ? " (" + s.last_error + ")" : "")
     : (s.config_warning || "");
-  const acText = !ac.reachable ? "unreachable"
-    : (ac.power ? "on" : "off") + ", " + ac.mode + (ac.target_c != null ? " " + ac.target_c + " °C" : "")
-      + (ac.fan ? ", fan " + ac.fan : "");
-  const resets = Object.entries(d.resets || {}).map(([k, v]) => k + " " + v).join(", ");
-  const info = [
-    ["AC", acText],
+  rows($("rows"), [
+    ["AC", acText(s)],
     ["reads", s.reads + " (" + s.read_errors + " failed), writes " + s.writes],
+  ]);
+  const resets = Object.entries(d.resets || {}).map(([k, v]) => k + " " + v).join(", ");
+  rows($("device"), [
+    ["AC", acText(s)],
     ["uptime", dur(d.uptime_s)],
     ["boot", d.boot + " (" + d.reset_cause + ")"],
     ["resets", resets || "–"],
     ["last crash", d.last_crash || "–"],
     ["heap free", kb(d.heap_free) + ", largest block " + kb(d.heap_max_block)],
-    ["Wi-Fi", (d.rssi == null ? "down" : d.rssi + " dBm") + ", drops " + d.wifi_drops
-      + ", reconnects " + d.wifi_reconnects + ", for the AC " + d.ac_reconnects],
+    ["Wi-Fi", (d.rssi == null ? "down" : d.rssi + " dBm") + ", drops " + (d.wifi_drops ?? "–")
+      + ", reconnects " + (d.wifi_reconnects ?? "–") + ", for the AC " + (d.ac_reconnects ?? "–")],
+    ["IP", d.ip || "–"],
     ["firmware", d.fw],
-  ];
-  rows($("rows"), info);
+  ]);
+  document.dispatchEvent(new CustomEvent("state", { detail: s }));
 }
 
 function renderEvents(list) {
@@ -195,6 +270,11 @@ async function poll() {
   timer = setTimeout(poll, 5000);
 }
 $("profile").addEventListener("change", (ev) => setProfile(ev.target.value));
+window.addEventListener("hashchange", showTab);
+</script>
+<script src="/editor.js"></script>
+<script>
+showTab();
 poll();
 </script>
 </body>

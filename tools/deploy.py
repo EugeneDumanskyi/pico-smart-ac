@@ -28,6 +28,7 @@ MPY_DIR = Path(os.environ.get("MPY_DIR", "~/.cache/smartac/micropython-v1.29.0")
 MPY_CROSS = MPY_DIR / "mpy-cross" / "build" / "mpy-cross"
 MPREMOTE = shlex.split(os.environ.get("MPREMOTE", "pipx run mpremote==1.29.0"))
 TREES = ("smartac", "lib")  # under src/, compiled to .mpy
+WEB_FILES = ("index.html", "editor.js")  # served by shell/api.py's routes, nothing else
 MANAGED = ("/smartac", "/lib", "/www")  # board dirs this tool owns; stale files in them are removed
 APP_FILES = (".json", ".json.bak", ".json.tmp", ".log", "crash.txt")  # the app's; only --backup reads them
 
@@ -118,7 +119,8 @@ def build():
             subprocess.run([str(MPY_CROSS), "-o", str(out), str(rel)], cwd=SRC, check=True)
             count += 1
     (BUILD / "www").mkdir()
-    shutil.copy(ROOT / "web" / "index.html", BUILD / "www" / "index.html")
+    for name in WEB_FILES:
+        shutil.copy(ROOT / "web" / name, BUILD / "www" / name)
     shutil.copy(SRC / "main.py", BUILD / "main.py")
     print("built %d modules into %s" % (count, BUILD.relative_to(ROOT)))
 
