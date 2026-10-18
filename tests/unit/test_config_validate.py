@@ -350,3 +350,105 @@ class TestSettings(unittest.TestCase):
         errors = config.validate_settings(s, profiles())[0]
         self.assertEqual(paths(errors), ["hard_cap_min"])  # only day.humid (80 min); 60 still fits
         self.assertIn("profiles.day.rules[1]", errors[0]["msg"])
+
+
+# --- idea.md's "Validation" table, row by row: one accepted and one rejected change each ---
+
+R = "profiles.day.rules[0]"
+
+
+def rule_list(n):
+    return [dict(first_rule(profiles()), name="r%d" % i) for i in range(n)]
+
+
+def extra_profiles(n, rules=1):
+    def add(doc):
+        for i in range(n):
+            doc["profiles"]["p%d" % i] = {"label": "y" * 32, "rules": rule_list(rules)}
+
+    return add
+
+
+def phase(doc, i):
+    return first_rule(doc)["phases"][i]
+
+
+def cond(doc):
+    return first_rule(doc)["when"]["conditions"][0]
+
+
+def fans(n):
+    return [{"mode": "fan", "fan": "3", "max_min": 20, "until": None} for _ in range(n)]
+
+
+# (row, document, path, accepted change, rejected change, "error" | "warning"); a change mutates a default document.
+TABLE = (
+    ("target_c 18-30", "p", R + ".phases[0].target_c",
+     lambda d: phase(d, 0).update(target_c=18), lambda d: phase(d, 0).update(target_c=30.5), "error"),
+    ("target_c step 0.5", "p", R + ".phases[0].target_c",
+     lambda d: phase(d, 0).update(target_c=29.5), lambda d: phase(d, 0).update(target_c=26.3), "error"),
+    ("value temp 10-45", "p", R + ".when.conditions[0].value",
+     lambda d: cond(d).update(value=45), lambda d: cond(d).update(value=45.5), "error"),
+    ("value outdoor_temp 10-45", "p", R + ".when.conditions[0].value",
+     lambda d: cond(d).update(sensor="outdoor_temp", value=10),
+     lambda d: cond(d).update(sensor="outdoor_temp", value=9.5), "error"),
+    ("value hum 20-95", "p", R + ".when.conditions[0].value",
+     lambda d: cond(d).update(sensor="hum", value=20), lambda d: cond(d).update(sensor="hum", value=96), "error"),
+    ("max_min 1-120", "p", R + ".phases[1].max_min",
+     lambda d: phase(d, 1).update(max_min=1), lambda d: phase(d, 1).update(max_min=0), "error"),
+    ("sum of phases <= hard_cap_min", "p", R + ".phases",
+     lambda d: phase(d, 0).update(max_min=100), lambda d: phase(d, 0).update(max_min=101), "error"),
+    ("cooldown_min 0-480", "p", R + ".cooldown_min",
+     lambda d: first_rule(d).update(cooldown_min=480), lambda d: first_rule(d).update(cooldown_min=481), "error"),
+    ("confirm_reads 1-10", "p", R + ".confirm_reads",
+     lambda d: first_rule(d).update(confirm_reads=1), lambda d: first_rule(d).update(confirm_reads=11), "error"),
+    ("min_interval_min 0-1440", "p", R + ".min_interval_min",
+     lambda d: first_rule(d).update(min_interval_min=1440),
+     lambda d: first_rule(d).update(min_interval_min=1441), "error"),
+    ("manual_hold_min 10-480", "s", "manual_hold_min",
+     lambda s: s.update(manual_hold_min=10), lambda s: s.update(manual_hold_min=481), "error"),
+    ("finish_fan_min 0-60", "s", "finish_fan_min",
+     lambda s: s.update(finish_fan_min=0), lambda s: s.update(finish_fan_min=61), "error"),
+    ("phases per rule 1-5", "p", R + ".phases",
+     lambda d: first_rule(d).update(phases=fans(5)), lambda d: first_rule(d).update(phases=fans(6)), "error"),
+    ("rules per profile 1-8", "p", "profiles.day.rules",
+     lambda d: d["profiles"]["day"].update(rules=rule_list(8)),
+     lambda d: d["profiles"]["day"].update(rules=rule_list(9)), "error"),
+    ("profiles <= 10", "p", "profiles", extra_profiles(7), extra_profiles(8), "error"),
+    ("rule names [a-z0-9_]{1,24}", "p", R + ".name",
+     lambda d: first_rule(d).update(name="a_9" + "x" * 21), lambda d: first_rule(d).update(name="Too hot"), "error"),
+    ("profile names [a-z0-9_]{1,24}", "p", "profiles.Evening",
+     lambda d: d["profiles"].update(evening_2=profiles()["profiles"]["away"]),
+     lambda d: d["profiles"].update(Evening=profiles()["profiles"]["away"]), "error"),
+    ("rule names unique", "p", "profiles.day.rules[1].name",
+     lambda d: d["profiles"]["day"]["rules"][1].update(name="warm"),
+     lambda d: d["profiles"]["day"]["rules"][1].update(name="too_hot"), "error"),
+    ("document <= 16 KB", "p", "$", extra_profiles(5, 8), extra_profiles(6, 8), "error"),  # 16340 and 19236 bytes
+    ("until moves the right way", "p", R + ".phases[0].until",
+     lambda d: phase(d, 0).update(until={"sensor": "hum", "op": "<", "value": 60}),
+     lambda d: phase(d, 0).update(until={"sensor": "temp", "op": ">=", "value": 30}), "warning"),
+    ("cool/dry ends with fan", "p", R + ".phases",
+     lambda d: phase(d, 1).update(max_min=10), lambda d: first_rule(d)["phases"].pop(), "warning"),
+)
+
+
+class TestIdeaTable(unittest.TestCase):
+    def validate(self, target, change):
+        doc = profiles() if target == "p" else config.default_settings()
+        change(doc)
+        if target == "p":
+            return config.validate_profiles(doc)
+        return config.validate_settings(doc, profiles())
+
+    def test_every_row(self):
+        failed = []
+        for row, target, path, good, bad, kind in TABLE:
+            errors, warnings = self.validate(target, good)
+            if errors or path in paths(warnings):
+                failed.append("%s: accepted change gave %r %r" % (row, errors, warnings))
+            errors, warnings = self.validate(target, bad)
+            if kind == "error" and path not in paths(errors):
+                failed.append("%s: rejected change gave no error at %s, got %r" % (row, path, paths(errors)))
+            if kind == "warning" and (errors or path not in paths(warnings)):
+                failed.append("%s: rejected change gave %r and no warning at %s" % (row, errors, path))
+        self.assertEqual(failed, [])
