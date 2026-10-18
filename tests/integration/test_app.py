@@ -345,3 +345,161 @@ class TestShadow(unittest.TestCase):
         self.assertEqual([(d["kind"], d["msg"]) for d in flash(w.store)][1], (t.EV_PROFILE, "profile day"))
         self.assertEqual(app.controller.state, t.RUNNING)
         self.assertEqual(w.device.writes, 0)
+
+
+def day_short(doc):
+    # Every day rule: 10 min of cool or dry and 5 min of fan (the room warms past too_hot's 29 C after a while).
+    for r in doc["profiles"]["day"]["rules"]:
+        r["phases"][0]["max_min"] = 10
+        r["phases"][1]["max_min"] = 5
+    return doc
+
+
+def event_times(w, kind):
+    return [s[0] for s in w.steps for k, p in s[3] if k == t.CMD_EVENT and p[0] == kind]
+
+
+class TestConfigSave(unittest.TestCase):
+    def test_running_cycle_keeps_its_rule_and_the_next_one_uses_the_saved(self):
+        w = World("day")
+        app = w.app(shadow=True)
+        w.run(app, 5 * 60 * 1000)
+        self.assertEqual(app.controller.state, t.RUNNING)
+        status, body = app.save_profiles(day_short(config.default_profiles()))
+        self.assertEqual((status, body), (200, {"ok": True, "warnings": []}))
+        self.assertEqual(app.controller.profiles, dict(config.default_profiles(), active="day"))  # not yet
+        w.run(app, 4 * 60 * 60 * 1000)
+        starts, phases = event_times(w, t.EV_CYCLE_START), event_times(w, t.EV_PHASE)
+        # The first cycle (humid, from 1:00) runs its 60 min dry phase; the next one (after the cooldown) 10 min.
+        self.assertEqual(phases[0] - starts[0], 60 * 60 * 1000)
+        second = [p for p in phases if p > starts[1]][0]
+        self.assertEqual(second - starts[1], 10 * 60 * 1000)
+        self.assertEqual(app.controller.profiles["profiles"]["day"]["rules"][1]["phases"][0]["max_min"], 10)
+        self.assertEqual(w.store.load("profiles"), dict(day_short(config.default_profiles()), active="day"))
+
+    def test_saved_document_is_on_flash_at_once_and_logged(self):
+        w = World("day")
+        app = w.app(shadow=True)
+        app.save_settings(dict(config.default_settings(HOST), poll_s=120))
+        app.save_profiles(day_short(config.default_profiles()))
+        self.assertEqual(w.store.load("settings")["poll_s"], 120)
+        self.assertEqual(app.profiles_doc(), dict(day_short(config.default_profiles()), active="day"))
+        self.assertEqual(app.settings_doc()["poll_s"], 120)
+        self.assertTrue(app.wake.is_set())
+        saved = [(d["kind"], d["msg"]) for d in flash(w.store) if d["kind"] == t.EV_CONFIG_SAVED]
+        self.assertEqual(saved, [(t.EV_CONFIG_SAVED, "settings saved"), (t.EV_CONFIG_SAVED, "profiles saved")])
+        w.run(app, 1000)
+        self.assertEqual((app.poll_ms(), app.pending), (120 * 1000, {}))
+
+    def test_errors_save_nothing(self):
+        w = World("day")
+        app = w.app(shadow=True)
+        doc = config.default_profiles()
+        doc["profiles"]["day"]["rules"][0]["phases"][0]["target_c"] = 31
+        status, body = app.save_profiles(doc)
+        self.assertEqual(status, 400)
+        self.assertEqual(body["errors"][0]["path"], "profiles.day.rules[0].phases[0].target_c")
+        status, body = app.save_settings(dict(config.default_settings(HOST), hard_cap_min=60))
+        self.assertEqual((status, body["errors"][0]["path"]), (400, "hard_cap_min"))  # day.humid needs 80 min
+        self.assertEqual((app.pending, w.store.load("settings")), ({}, None))
+        self.assertEqual(w.store.load("profiles")["profiles"], config.default_profiles()["profiles"])
+
+    def test_active_is_kept_and_cannot_be_deleted(self):
+        w = World("night")
+        app = w.app(shadow=True)
+        doc = config.default_profiles()  # says "off"
+        self.assertEqual(app.validate_profiles(doc)[0], 200)
+        self.assertEqual(doc["active"], "night")
+        del doc["profiles"]["night"]
+        status, body = app.save_profiles(doc)
+        self.assertEqual((status, body["errors"]), (400, [{"path": "profiles.night",
+                                                           "msg": "the active profile; switch first"}]))
+
+    def test_validate_does_not_save(self):
+        w = World("day")
+        app = w.app(shadow=True)
+        doc = day_short(config.default_profiles())
+        doc["profiles"]["day"]["rules"][1]["phases"].pop()
+        status, body = app.validate_profiles(doc)
+        self.assertEqual((status, [x["path"] for x in body["warnings"]]), (200, ["profiles.day.rules[1].phases"]))
+        self.assertEqual((app.pending, app.warnings), ({}, []))
+        self.assertEqual(w.store.load("profiles")["profiles"], config.default_profiles()["profiles"])
+
+    def test_reset_with_a_custom_active_profile_switches_to_off(self):
+        w = World()
+        doc = config.default_profiles()
+        doc["profiles"]["mine"] = doc["profiles"]["day"]
+        doc["active"] = "mine"
+        w.store.save("profiles", doc)
+        app = w.app(shadow=True)
+        w.run(app, 5 * 60 * 1000)
+        self.assertEqual((app.controller.active, app.controller.state), ("mine", t.RUNNING))
+        self.assertEqual(app.reset_profiles()[0], 200)
+        self.assertEqual(w.store.load("profiles"), config.default_profiles())
+        w.run(app, 6 * 60 * 1000)
+        self.assertEqual(app.controller.active, "off")
+        self.assertEqual((app.controller.state, app.controller.cycle["phase"]), (t.RUNNING, 1))  # finish: fan, off
+        self.assertEqual(w.store.load("profiles")["active"], "off")
+
+    def test_reset_keeps_a_default_active_profile(self):
+        w = World("night")
+        app = w.app(shadow=True)
+        doc = config.default_profiles()
+        doc["profiles"]["night"]["label"] = "Late"
+        app.save_profiles(doc)
+        app.reset_profiles()
+        self.assertEqual(w.store.load("profiles"), dict(config.default_profiles(), active="night"))
+
+    def test_switch_while_a_save_waits_keeps_the_saved_document(self):
+        # A tick that switches the profile rewrites profiles.json: it must start from the saved document.
+        w = World()
+        app = w.app(shadow=True)
+        app.save_profiles(day_short(config.default_profiles()))
+        app._persist(dict(app.controller._snapshot(), profile="day"))  # a tick already under way
+        self.assertEqual(w.store.load("profiles"), dict(day_short(config.default_profiles()), active="day"))
+
+    def test_shadow_keeps_the_owner_dry_run_in_the_file(self):
+        w = World()
+        app = w.app(shadow=True)
+        app.save_settings(dict(config.default_settings(HOST), dry_run=False, manual_hold_min=60))
+        w.run(app, 1000)
+        self.assertEqual((app.controller.settings["dry_run"], app.controller.settings["manual_hold_min"]), (True, 60))
+        self.assertEqual((app.settings_doc()["dry_run"], w.store.load("settings")["dry_run"]), (False, False))
+        self.assertTrue(app.status()["dry_run"])
+
+    def test_new_ac_address_starts_over(self):
+        w = World()
+        app = w.app(shadow=True)
+        w.run(app, 1000)
+        client = app.client
+        self.assertTrue(app.seen_ac)
+        app.save_settings(dict(config.default_settings(HOST), poll_s=90))
+        app._configure([])
+        self.assertIs(app.client, client)  # same address and limits: kept
+        app.save_settings(dict(config.default_settings(HOST), ac_ip="192.0.2.10"))
+        app._configure([])
+        self.assertEqual((app.client.ip, app.seen_ac, app.unreachable_since), ("192.0.2.10", False, None))
+        app.save_settings(dict(config.default_settings(HOST), sensor_limits={"temp": [5, 50], "hum": [5, 100]}))
+        w.run(app, 2000)
+        self.assertEqual((app.client.ip, app.client.limits["temp"], app.seen_ac), (HOST, [5, 50], True))
+
+    def test_saves_clear_the_load_warning(self):
+        w = World()
+        w.store.save("profiles", {"version": 1})
+        app = w.app(shadow=True)
+        self.assertEqual([x["path"] for x in app.warnings], ["profiles"])
+        doc = config.default_profiles()
+        doc["profiles"]["day"]["rules"][0]["phases"].pop()
+        app.save_profiles(doc)
+        self.assertEqual([x["path"] for x in app.warnings], ["profiles.profiles.day.rules[0].phases"])
+        app.save_profiles(config.default_profiles())
+        self.assertEqual((app.warnings, app.status()["config_warning"]), ([], None))
+
+    def test_observe_mode_saves_settings_only(self):
+        w = World()
+        app = w.app(observe=True)
+        self.assertEqual(app.save_settings(dict(config.default_settings(HOST), poll_s=30))[0], 200)
+        self.assertEqual(app.save_profiles(config.default_profiles())[0], 409)
+        self.assertEqual((app.profiles_doc(), app.reset_profiles()[0]), (None, 409))
+        w.run(app, 1000)
+        self.assertEqual(app.poll_ms(), 30 * 1000)

@@ -5,18 +5,23 @@
 # Observe mode (M1) builds no controller: a tick reads the AC and records history, so nothing can write.
 # Shadow mode (M3) runs the controller with dry_run forced on, whatever settings.json and state.json say, and keeps
 # its decisions on flash. A write that still comes out is not sent: it becomes a `blocked` event.
+# A saved config document (save_profiles(), save_settings()) is on flash at once and parked in `pending`; the next
+# tick applies it before it reads, so only the control task touches the controller and the client.
 import asyncio
 
 from smartac.core import config
-from smartac.core.controller import Controller
+from smartac.core.config import OFF
+from smartac.core.controller import FINISH, Controller
 from smartac.core.events import FLASH_KINDS, SHADOW_FLASH_KINDS, EventLog, to_line
 from smartac.core.history import History
 from smartac.core.types import (
+    ACT_SET_PROFILE,
     CMD_EVENT,
     CMD_PERSIST,
     CMD_WRITE,
     EV_BLOCKED,
     EV_BOOT,
+    EV_CONFIG_SAVED,
     OBSERVE,
     Reading,
     ticks_since,
@@ -54,6 +59,8 @@ class App:
         # ac_ip: DAIKIN_IP from secrets.py, used until settings.json names one.
         self.board = board
         self.store = store
+        self.ac_ip = ac_ip
+        self.ac_port = ac_port
         self.observe = observe
         self.shadow = shadow
         self.boot = store.next_boot()
@@ -63,8 +70,8 @@ class App:
         self.warnings = []
         settings = self._load("settings", config.validate_settings, config.default_settings(ac_ip))
         self.settings = settings
-        ip = settings.get("ac_ip") or ac_ip
-        self.client = None if ip is None else DaikinClient(ip, ac_port, limits=settings["sensor_limits"])
+        self.client = None
+        self._set_client(settings)
         now = board.ticks_ms()
         self.controller = None
         self.active = None
@@ -83,6 +90,7 @@ class App:
         self.history = History()
         self.events = EventLog(self.boot, flash_kinds=SHADOW_FLASH_KINDS if shadow else FLASH_KINDS)
         self.queue = []
+        self.pending = {}  # name -> a saved document the next tick applies
         self.wake = asyncio.Event()
         self.uptime_ms = 0
         self._last = now
@@ -200,6 +208,103 @@ class App:
         temp, hum = self._sensors()
         self.store.append_event(to_line(self.events.boot, self.uptime_ms, kind, msg, temp, hum))
 
+    # --- config documents (idea.md, "HTTP API": /api/profiles, /api/settings)
+    # The handlers return (status, body). A save validates, writes the file (FileStore: .tmp, .bak, rename) and
+    # parks the document for the next tick. A running cycle keeps the copy it took at its start.
+
+    def profiles_doc(self):
+        # -> profiles.json as the next tick will run it, with the controller's active profile; None in observe mode.
+        ctl = self.controller
+        if ctl is None:
+            return None
+        return dict(self.pending.get("profiles") or ctl.profiles, active=ctl.active)
+
+    def settings_doc(self):
+        # -> settings.json as saved: in shadow mode the owner's dry_run, not the forced one.
+        return self.pending.get("settings") or self.settings
+
+    def validate_profiles(self, doc):
+        return self._check_profiles(doc)[:2]
+
+    def save_profiles(self, doc, reset=False):
+        status, body, warnings = self._check_profiles(doc, reset)
+        if status == 200:
+            self._save("profiles", doc, warnings)
+        return status, body
+
+    def reset_profiles(self):
+        # Restore defaults: the active profile stays if it is a default one; otherwise the tick that applies the
+        # defaults switches to off (finish).
+        return self.save_profiles(config.default_profiles(), True)
+
+    def save_settings(self, doc):
+        profiles = self.pending.get("profiles") or (None if self.controller is None else self.controller.profiles)
+        errors, warnings = config.validate_settings(doc, profiles)
+        if errors:
+            return 400, {"ok": False, "errors": errors}
+        self._save("settings", doc, warnings)
+        return 200, {"ok": True, "warnings": warnings}
+
+    def _check_profiles(self, doc, reset=False):
+        # -> (status, body, warnings). `active` is not the page's to change: it becomes the controller's current
+        # profile, which a save can't delete or rename (a reset saves "off" instead).
+        ctl = self.controller
+        if ctl is None:
+            return 409, {"ok": False, "errors": [{"path": "$", "msg": "no controller in observe mode"}]}, []
+        profiles = doc.get("profiles") if isinstance(doc, dict) else None
+        gone = ctl.active != OFF and isinstance(profiles, dict) and ctl.active not in profiles
+        if isinstance(doc, dict):
+            doc["active"] = OFF if gone and reset else ctl.active
+        errors, warnings = config.validate_profiles(doc, self.settings_doc()["hard_cap_min"])
+        if gone and not reset:
+            errors = [e for e in errors if e["path"] != "active"]
+            errors.append({"path": "profiles." + ctl.active, "msg": "the active profile; switch first"})
+        if errors:
+            return 400, {"ok": False, "errors": errors}, warnings
+        return 200, {"ok": True, "warnings": warnings}, warnings
+
+    def _save(self, name, doc, warnings):
+        self.store.save(name, doc)
+        self.pending[name] = doc
+        if name == "profiles":
+            self.active = doc["active"]
+        prefix = name + "."
+        self.warnings = [w for w in self.warnings if w["path"] != name and not w["path"].startswith(prefix)]
+        self.warnings.extend({"path": prefix + w["path"], "msg": w["msg"]} for w in warnings)
+        self._event(self._now(), EV_CONFIG_SAVED, name + " saved")
+        self.wake.set()
+
+    def _configure(self, actions):
+        # The saved documents, applied at the start of a tick. A profile switch it needs goes first in `actions`.
+        pending = self.pending
+        self.pending = {}
+        settings = pending.get("settings")
+        if settings is not None:
+            self.settings = settings
+            self._set_client(settings)
+        ctl = self.controller
+        if ctl is None:
+            return
+        if settings is not None and self.shadow:
+            settings = dict(settings, dry_run=True)
+        ctl.configure(pending.get("profiles"), settings)
+        if ctl.active != OFF and ctl.active not in ctl.profiles.get("profiles", {}):
+            # Gone (Restore defaults, or a switch that raced a save): fail towards off.
+            actions.insert(0, {"action": ACT_SET_PROFILE, "profile": OFF, "cycle": FINISH})
+
+    def _set_client(self, settings):
+        # A new address starts over: "unreachable" until the AC answers there, never the net task's reset, which
+        # needs an AC that answered this boot.
+        ip = settings.get("ac_ip") or self.ac_ip
+        old = self.client
+        limits = settings["sensor_limits"]
+        if old is not None and old.ip == ip and old.limits == limits:
+            return
+        self.client = None if ip is None else DaikinClient(ip, self.ac_port, limits=limits)
+        if old is not None and old.ip != ip:
+            self.seen_ac = False
+            self.unreachable_since = None
+
     def _sensors(self):
         r = self.last_reading
         return (None, None) if r is None else (r.temp, r.hum)
@@ -220,12 +325,14 @@ class App:
                 await self.board.wait(self.wake, left)
 
     async def tick(self):
-        if self.controller is None:
-            await self._read()
-            return
         actions = self.queue
         self.queue = []
         self.wake.clear()
+        if self.pending:
+            self._configure(actions)
+        if self.controller is None:
+            await self._read()
+            return
         reading = await self._read()
         now = self._now()
         write = self._apply(now, self._step(now, reading, actions))
@@ -284,8 +391,9 @@ class App:
     def _persist(self, snap):
         self.store.save("state", snap)
         if snap["profile"] != self.active:
-            # The active profile lives in profiles.json; the snapshot only mirrors it.
-            profiles = dict(self.controller.profiles)
+            # The active profile lives in profiles.json; the snapshot only mirrors it. A saved document the next
+            # tick applies is the one on flash, so it is the one to update.
+            profiles = dict(self.pending.get("profiles") or self.controller.profiles)
             profiles["active"] = snap["profile"]
             self.store.save("profiles", profiles)
             self.active = snap["profile"]
