@@ -1,10 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# HTTP routes (idea.md, "HTTP API"): GET /, /api/state, /api/history, /api/events, /api/log, and POST /api/active
-# (brought forward from M5 for shadow mode). GETs are open on the LAN; a POST needs X-Token equal to API_TOKEN from
-# secrets.py, and with no token configured every POST is refused. Unknown paths -> 404, other methods -> 405.
+# HTTP routes (idea.md, "HTTP API"): GET /, /editor.js, /api/state, /api/history, /api/events, /api/log,
+# GET/PUT /api/profiles and /api/settings, POST /api/profiles/validate and /reset, and POST /api/active (brought
+# forward from M5 for shadow mode). GETs are open on the LAN; a POST or PUT needs X-Token equal to API_TOKEN from
+# secrets.py, and with no token configured every one is refused. Unknown paths -> 404, other methods -> 405.
 # Microdot has no read timeout: a client that stops mid-request would keep its socket and task forever, so each
-# request runs under a deadline. Request sizes are capped low; /api/history and /api/log are streamed.
+# request runs under a deadline. /api/history and /api/log are streamed.
+# Bodies: Microdot reads up to max_body_length itself; a config document (up to 16 KB) is read from the stream only
+# after the token check, one at a time (a parsed 16 KB document takes ~90 KB of heap). Larger than
+# max_content_length -> 413 before any route runs.
 import asyncio
+import json
 import sys
 
 from microdot import Microdot, Request, Response
@@ -14,7 +19,9 @@ from smartac.core.controller import FINISH, LEAVE
 from smartac.core.types import ACT_SET_PROFILE
 
 REQUEST_TIMEOUT_MS = 10000
-Request.max_content_length = 1024
+MAX_DOC_BODY = 17 * 1024  # config.MAX_DOC_BYTES plus room for the page's whitespace
+DRAIN_CHUNK = 512
+Request.max_content_length = MAX_DOC_BODY
 Request.max_body_length = 1024
 Request.max_readline = 1024
 
@@ -52,14 +59,66 @@ def _error(status, msg):
     return {"error": msg}, status
 
 
+def _invalid(msg):
+    return {"ok": False, "errors": [{"path": "$", "msg": msg}]}, 400
+
+
+async def _drain(req):
+    # Read and drop a body Microdot left on the stream, so the reply isn't lost to a reset on close.
+    left = req.content_length if req.content_length > Request.max_body_length else 0
+    while left > 0:
+        data = await req.stream.read(min(left, DRAIN_CHUNK))
+        if not data:
+            break
+        left -= len(data)
+
+
+async def _read_json(req):
+    # -> (document, None) or (None, error message).
+    try:
+        if req.content_length > Request.max_body_length:
+            data = await req.stream.readexactly(req.content_length)
+        else:
+            data = req.body
+        return json.loads(data.decode()), None
+    except (EOFError, ValueError):  # UnicodeError is a ValueError
+        return None, "body must be a JSON document"
+
+
 def make(app, www="/www", timeout_ms=REQUEST_TIMEOUT_MS, token=None):
     # app: shell.app.App; token: API_TOKEN, None refuses every POST.
     # -> the Microdot server; start it with `await server.start_server(host, port)`.
     web = _Server(timeout_ms)
+    saving = [False]  # one config document in memory at a time
+
+    def refused():
+        return _error(401, "token missing or wrong" if token else "no API_TOKEN in secrets.py")
+
+    async def with_doc(req, handler):
+        # Token, then the body, then handler(document) -> (status, body).
+        if not _token_ok(req.headers.get("X-Token"), token):
+            await _drain(req)
+            return refused()
+        if saving[0]:
+            await _drain(req)
+            return _error(503, "busy with another save, try again")
+        saving[0] = True
+        try:
+            doc, err = await _read_json(req)
+            if err is not None:
+                return _invalid(err)
+            status, body = handler(doc)
+            return body, status
+        finally:
+            saving[0] = False
 
     @web.get("/")
     async def index(req):
         return Response.send_file(www + "/index.html", max_age=0)
+
+    @web.get("/editor.js")
+    async def editor(req):
+        return Response.send_file(www + "/editor.js", max_age=0)
 
     @web.get("/api/state")
     async def state(req):
@@ -84,7 +143,7 @@ def make(app, www="/www", timeout_ms=REQUEST_TIMEOUT_MS, token=None):
     async def active(req):
         # {"profile": "night", "cycle": "finish" | "leave"} -> 202 and the state; the next tick applies it.
         if not _token_ok(req.headers.get("X-Token"), token):
-            return _error(401, "token missing or wrong" if token else "no API_TOKEN in secrets.py")
+            return refused()
         try:
             body = req.json
         except ValueError:
@@ -103,6 +162,40 @@ def make(app, www="/www", timeout_ms=REQUEST_TIMEOUT_MS, token=None):
         if not app.action({"action": ACT_SET_PROFILE, "profile": name, "cycle": cycle}):
             return _error(503, "busy, try again")
         return app.status(), 202
+
+    @web.get("/api/profiles")
+    async def get_profiles(req):
+        doc = app.profiles_doc()
+        return _error(409, "no controller in observe mode") if doc is None else doc
+
+    @web.put("/api/profiles")
+    async def put_profiles(req):
+        return await with_doc(req, app.save_profiles)
+
+    @web.post("/api/profiles/validate")
+    async def validate_profiles(req):
+        return await with_doc(req, app.validate_profiles)
+
+    @web.post("/api/profiles/reset")
+    async def reset_profiles(req):
+        if not _token_ok(req.headers.get("X-Token"), token):
+            return refused()
+        if saving[0]:
+            return _error(503, "busy with another save, try again")
+        status, body = app.reset_profiles()
+        return body, status
+
+    @web.get("/api/settings")
+    async def get_settings(req):
+        return app.settings_doc()
+
+    @web.put("/api/settings")
+    async def put_settings(req):
+        return await with_doc(req, app.save_settings)
+
+    @web.errorhandler(413)
+    async def too_large(req):
+        return _error(413, "body larger than %d KB" % (MAX_DOC_BODY // 1024))
 
     @web.errorhandler(404)
     async def not_found(req):

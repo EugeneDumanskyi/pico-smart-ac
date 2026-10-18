@@ -12,6 +12,7 @@ from sim.clock import FakeClock
 from sim.device import FakeDaikin
 from sim.server import DEFAULT_PORT, serve
 from smartac.board.host import HostBoard
+from smartac.core import config
 from smartac.core import types as t
 from smartac.shell import api
 from smartac.shell.app import MAX_ACTIONS, App
@@ -28,17 +29,22 @@ def get(path):
 TOKEN = "test-token-123"
 
 
-def post(path, body, token=None):
+def post(path, body, token=None, method="POST"):
     data = body if isinstance(body, bytes) else json.dumps(body).encode()
-    head = "POST %s HTTP/1.1\r\nHost: pico\r\nContent-Type: application/json\r\nContent-Length: %d\r\n" % (
-        path, len(data))
+    head = "%s %s HTTP/1.1\r\nHost: pico\r\nContent-Type: application/json\r\nContent-Length: %d\r\n" % (
+        method, path, len(data))
     if token is not None:
         head += "X-Token: %s\r\n" % token
     return (head + "\r\n").encode() + data
 
 
+def put(path, body, token=None):
+    return post(path, body, token, "PUT")
+
+
 def exchange(*requests, timeout_ms=api.REQUEST_TIMEOUT_MS, shadow=False, token=None, store=None, after=None):
     # Start the app's server, send each raw request on its own connection. -> [(status, body) or None].
+    # A request may also be `async f(port) -> reply`, for exchanges that need more than one connection.
     # after(app): awaited once the replies are in, e.g. a tick that applies a queued action.
     async def main():
         clock = FakeClock()
@@ -54,7 +60,7 @@ def exchange(*requests, timeout_ms=api.REQUEST_TIMEOUT_MS, shadow=False, token=N
         try:
             replies = []
             for r in requests:  # no await in a comprehension on MicroPython
-                replies.append(await simhttp.raw(PORT, r))
+                replies.append(await (simhttp.raw(PORT, r) if isinstance(r, bytes) else r(PORT)))
             if after is not None:
                 await after(app)
             return replies
@@ -92,15 +98,15 @@ class TestRoutes(unittest.TestCase):
         self.assertTrue(b"/api/state" in body)
 
     def test_unknown_path_and_method(self):
-        replies = exchange(get("/api/profiles"), get("/www/index.html"), b"POST /api/state HTTP/1.1\r\n\r\n",
+        replies = exchange(get("/api/nope"), get("/www/index.html"), b"POST /api/state HTTP/1.1\r\n\r\n",
                            get("/api/active"))
         self.assertEqual([r[0] for r in replies], [404, 404, 405, 405])
         self.assertEqual(json.loads(replies[0][1]), {"error": "not found"})
 
     def test_large_body_is_refused(self):
-        req = b"POST /api/state HTTP/1.1\r\nContent-Length: 5000\r\n\r\n"
-        [(status, _)] = exchange(req)
-        self.assertEqual(status, 413)
+        req = b"PUT /api/profiles HTTP/1.1\r\nContent-Length: %d\r\n\r\n" % (17 * 1024 + 1)
+        [(status, body)] = exchange(req)
+        self.assertEqual((status, json.loads(body)), (413, {"error": "body larger than 17 KB"}))
 
     def test_stalled_request_is_closed(self):
         # Headers never finish: the deadline closes the connection without a reply, and the server goes on.
@@ -219,3 +225,157 @@ class TestLog(unittest.TestCase):
         lines = [json.loads(line) for line in body.decode().splitlines()]
         self.assertEqual(status, 200)
         self.assertEqual([(d["boot"], d["kind"]) for d in lines], [(0, "heap")] * 3 + [(1, t.EV_BOOT)])
+
+
+def doc_body(doc):
+    return json.dumps(doc).encode()
+
+
+def custom_active_store(active="mine"):
+    store = MemoryStore()
+    doc = config.default_profiles()
+    doc["profiles"]["mine"] = doc["profiles"]["day"]
+    doc["active"] = active
+    store.save("profiles", doc)
+    return store
+
+
+class TestConfigRoutes(unittest.TestCase):
+    def test_get_documents(self):
+        replies = exchange(get("/api/profiles"), get("/api/settings"), shadow=True)
+        self.assertEqual([r[0] for r in replies], [200, 200])
+        self.assertEqual(json.loads(replies[0][1]), config.default_profiles())
+        self.assertEqual(json.loads(replies[1][1]), config.default_settings("127.0.0.1"))
+
+    def test_token_is_required_and_the_body_is_drained(self):
+        big = doc_body(config.default_profiles())  # > max_body_length: left on the stream by Microdot
+        self.assertTrue(len(big) > 1024)
+        replies = exchange(put("/api/profiles", big), put("/api/profiles", big, "x"),
+                           post("/api/profiles/validate", big), post("/api/profiles/reset", {}),
+                           put("/api/settings", config.default_settings()), shadow=True, token=TOKEN)
+        self.assertEqual([r[0] for r in replies], [401] * 5)
+        self.assertEqual(json.loads(replies[0][1]), {"error": "token missing or wrong"})
+
+    def test_save_then_applied_by_the_next_tick(self):
+        store = MemoryStore()
+        doc = config.default_profiles()
+        doc["profiles"]["day"]["label"] = "Daytime"
+
+        async def tick(app):
+            self.assertEqual(app.controller.profiles["profiles"]["day"]["label"], "Day")
+            await app.tick()
+            self.assertEqual(app.controller.profiles["profiles"]["day"]["label"], "Daytime")
+
+        replies = exchange(put("/api/profiles", doc, TOKEN), get("/api/profiles"), shadow=True, token=TOKEN,
+                           store=store, after=tick)
+        self.assertEqual((replies[0][0], json.loads(replies[0][1])), (200, {"ok": True, "warnings": []}))
+        self.assertEqual(json.loads(replies[1][1])["profiles"]["day"]["label"], "Daytime")  # the pending one
+        self.assertEqual(store.load("profiles")["profiles"]["day"]["label"], "Daytime")
+        self.assertIn(t.EV_CONFIG_SAVED, [json.loads(line)["kind"] for line in store.events])
+
+    def test_errors_carry_paths(self):
+        doc = config.default_profiles()
+        doc["profiles"]["day"]["rules"][0]["phases"][0]["target_c"] = 31
+        doc["profiles"]["night"]["rules"][1]["confirm_reads"] = 0
+        store = MemoryStore()
+        replies = exchange(put("/api/profiles", doc, TOKEN), put("/api/profiles", b"{nope", TOKEN),
+                           put("/api/profiles", b"\xff\xfe", TOKEN), shadow=True, token=TOKEN, store=store)
+        self.assertEqual([r[0] for r in replies], [400] * 3)
+        body = json.loads(replies[0][1])
+        self.assertEqual(body["ok"], False)
+        self.assertEqual(sorted(e["path"] for e in body["errors"]),
+                         ["profiles.day.rules[0].phases[0].target_c", "profiles.night.rules[1].confirm_reads"])
+        self.assertEqual(json.loads(replies[1][1])["errors"], [{"path": "$", "msg": "body must be a JSON document"}])
+        self.assertIsNone(store.load("profiles"))
+
+    def test_validate_does_not_save(self):
+        doc = config.default_profiles()
+        doc["profiles"]["day"]["rules"][0]["phases"].pop()
+        store = MemoryStore()
+
+        async def nothing_pending(app):
+            self.assertEqual(app.pending, {})
+
+        [(status, body)] = exchange(post("/api/profiles/validate", doc, TOKEN), shadow=True, token=TOKEN, store=store,
+                                    after=nothing_pending)
+        self.assertEqual(status, 200)
+        self.assertEqual([w["path"] for w in json.loads(body)["warnings"]], ["profiles.day.rules[0].phases"])
+        self.assertIsNone(store.load("profiles"))
+
+    def test_active_comes_from_the_controller(self):
+        doc = config.default_profiles()
+        doc["active"] = "day"  # ignored
+        store = custom_active_store()
+        gone = config.default_profiles()
+        replies = exchange(put("/api/profiles", doc, TOKEN), put("/api/profiles", gone, TOKEN), get("/api/profiles"),
+                           shadow=True, token=TOKEN, store=store)
+        self.assertEqual([r[0] for r in replies], [400, 400, 200])
+        self.assertEqual(json.loads(replies[0][1])["errors"], [{"path": "profiles.mine",
+                                                               "msg": "the active profile; switch first"}])
+        self.assertEqual(json.loads(replies[2][1])["active"], "mine")
+
+    def test_reset_with_a_custom_active_profile_queues_off(self):
+        store = custom_active_store()
+
+        async def tick(app):
+            await app.tick()
+            self.assertEqual(app.controller.active, "off")
+
+        [(status, body)] = exchange(post("/api/profiles/reset", {}, TOKEN), shadow=True, token=TOKEN, store=store,
+                                    after=tick)
+        self.assertEqual((status, json.loads(body)), (200, {"ok": True, "warnings": []}))
+        self.assertEqual(store.load("profiles"), config.default_profiles())
+
+    def test_settings(self):
+        store = MemoryStore()
+        low_cap = dict(config.default_settings("127.0.0.1"), hard_cap_min=60)
+        owner = dict(config.default_settings("127.0.0.1"), dry_run=False, poll_s=90)
+
+        async def tick(app):
+            await app.tick()
+            self.assertEqual((app.controller.settings["dry_run"], app.poll_ms()), (True, 90 * 1000))
+
+        replies = exchange(put("/api/settings", low_cap, TOKEN), put("/api/settings", owner, TOKEN),
+                           get("/api/settings"), shadow=True, token=TOKEN, store=store, after=tick)
+        self.assertEqual([r[0] for r in replies], [400, 200, 200])
+        self.assertEqual(json.loads(replies[0][1])["errors"][0]["path"], "hard_cap_min")
+        self.assertEqual(json.loads(replies[2][1]), owner)  # shadow mode doesn't change the file
+        self.assertEqual(store.load("settings"), owner)
+
+    def test_observe_mode(self):
+        replies = exchange(get("/api/profiles"), put("/api/profiles", config.default_profiles(), TOKEN),
+                           put("/api/settings", config.default_settings("127.0.0.1"), TOKEN), token=TOKEN)
+        self.assertEqual([r[0] for r in replies], [409, 409, 200])
+
+    def test_one_save_at_a_time(self):
+        body = doc_body(config.default_profiles())
+        whole = put("/api/profiles", body, TOKEN)
+        head, half = whole[: len(whole) - len(body) // 2], whole[len(whole) - len(body) // 2 :]
+
+        async def two(port):
+            # The first save stops halfway through its body; a second one comes in meanwhile.
+            reader, writer = await asyncio.open_connection(simhttp.HOST, port)
+            writer.write(head)
+            await writer.drain()
+            await asyncio.sleep_ms(50)
+            second = await simhttp.raw(port, put("/api/settings", config.default_settings("127.0.0.1"), TOKEN))
+            writer.write(half)
+            await writer.drain()
+            reply = b""
+            while True:
+                chunk = await asyncio.wait_for(reader.read(1024), 2)
+                if not chunk:
+                    break
+                reply += chunk
+            writer.close()
+            await writer.wait_closed()
+            return second, int(reply.split(b" ")[1])
+
+        [(second, first)] = exchange(two, shadow=True, token=TOKEN)
+        self.assertEqual((second[0], json.loads(second[1]), first),
+                         (503, {"error": "busy with another save, try again"}, 200))
+
+    def test_editor_script(self):
+        [(status, body)] = exchange(get("/editor.js"))
+        self.assertEqual(status, 200)
+        self.assertTrue(body.startswith(b"// SPDX"))
