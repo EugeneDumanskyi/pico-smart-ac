@@ -81,8 +81,8 @@ M1 app on the device, 2026-10-17, deployed with `tools/deploy.py` (all `.mpy`, 2
 | Running | after 1 min: 341 KB free, largest block 222 KB, RSSI -39 dBm. `/api/state` OK, `/api/history` (1 440 entries, 43 KB, streamed) in 0.57 s from the Mac, the page in 0.06 s. Mode changes made with the remote show up on the next read. |
 | `tests/device/crash_check.py` | PASS: the traceback is in `crash.txt`, the next boot's cause is `crash`, `last_crash` is the exception line |
 | `tests/device/wdt_check.py` | PASS: control heartbeat stalled, reset ~17 s later (10 s to go stale + 8 s watchdog), next boot's cause `watchdog` |
-| Wi-Fi drop (router restart) | not done yet |
-| Day soak (`tools/soak_log.py`, 12–14 h) | not done yet; the long soak runs in M3 (hourly `heap` lines in `events.log`) |
+| Wi-Fi drop (router restart) | moved to M4, where the owner is present |
+| Day soak, 2026-10-17/18 | PASS: 20 h on one boot, no reset or crash, 0 Wi-Fi drops or reconnects, the AC reachable throughout, 0 writes. Free heap 340 576–340 592 bytes the whole time. Largest block 205–253 KB (no trend) while `tools/soak_log.py` polled `/api/state` every minute for 7.5 h (452 polls, none failed); back at 253 KB in every hourly `heap` line of the 12 h after polling stopped. RSSI -29 to -37 dBm. The long soak runs in M3. |
 
 ## Flashing
 

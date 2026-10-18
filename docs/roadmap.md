@@ -84,7 +84,8 @@ and a tick only reads the AC and records history, so the write path can't be rea
 `dry_run`. Done so far (2026-10-17): step 0 device checks ([firmware.md](firmware.md#tested-on-the-device)),
 `core/history.py`, `FileStore`, `board/pico.py`, `shell/net.py`, `shell/api.py`, `shell/tasks.py`, the status page,
 `tools/deploy.py` and `tools/soak_log.py`; deployed, with the watchdog and crash checks passed on the device.
-Open: the day soak. Moved on 2026-10-17, as the owner can't keep a computer running for 3 days: the multi-day soak
+The day soak passed on 2026-10-18 ([firmware.md](firmware.md#tested-on-the-device)): 20 h on one boot, no reset,
+heap flat, 0 writes. **M1 is done.** Moved on 2026-10-17, as the owner can't keep a computer running for 3 days: the multi-day soak
 goes to M3, which runs a week anyway and is recorded on the Pico itself (an hourly `heap` line in `events.log`);
 the Wi-Fi drop test (router restart) goes to M4's safety checklist, where the owner is present.
 
