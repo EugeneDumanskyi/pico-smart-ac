@@ -3,7 +3,8 @@
 # - /maint exists: return to the REPL before anything starts. The watchdog can't be stopped once started, so this is
 #   how tools/deploy.py and the device tests get a quiet board.
 # - secrets.py missing: blink the LED fast, say so on the serial port, no Wi-Fi.
-# - Otherwise the app in observe mode (M1): it reads the AC and never writes.
+# - Otherwise the app in shadow mode (M3): the controller decides on real readings and logs what it would do; nothing
+#   is written to the AC.
 import os
 
 
@@ -34,7 +35,12 @@ def main():
     board = PicoBoard(secrets)
     store = FileStore("/")
     print("smartac: boot (%s)" % board.reset_cause())
-    tasks.run(board, store, lambda: App(board, store, getattr(secrets, "DAIKIN_IP", None), observe=True))
+    tasks.run(
+        board,
+        store,
+        lambda: App(board, store, getattr(secrets, "DAIKIN_IP", None), shadow=True),
+        token=getattr(secrets, "API_TOKEN", None),
+    )
 
 
 main()

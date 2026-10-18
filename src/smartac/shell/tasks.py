@@ -57,9 +57,9 @@ async def housekeeping(board, app):
         await board.sleep_ms(HOUSEKEEPING_MS)
 
 
-async def _main(board, app, port, www):
+async def _main(board, app, port, www, token):
     net = NetSupervisor(board, app)
-    web = api.make(app, www)
+    web = api.make(app, www, token=token)
     try:
         await asyncio.gather(
             app.control(), net.run(), web.start_server(port=port), watchdog(board, app, net), housekeeping(board, app)
@@ -80,10 +80,10 @@ def crash_text(e):
         return "%s: %s\n" % (type(e).__name__, e)
 
 
-def run(board, store, make_app, port=80, www="/www"):
-    # make_app() -> App, built here so a failure at boot is a crash like any other.
+def run(board, store, make_app, port=80, www="/www", token=None):
+    # make_app() -> App, built here so a failure at boot is a crash like any other. token: API_TOKEN for POSTs.
     try:
-        asyncio.run(_main(board, make_app(), port, www))
+        asyncio.run(_main(board, make_app(), port, www, token))
     except Exception as e:
         text = crash_text(e)
         print(text)

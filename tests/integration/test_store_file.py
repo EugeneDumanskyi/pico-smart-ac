@@ -4,14 +4,14 @@ import json
 import os
 import unittest
 
-from smartac.shell.store import EVENT_LOG_BYTES, MAX_CRASH, FileStore
+from smartac.shell.store import EVENT_LOG_BYTES, MAX_CRASH, READ_CHUNK, FileStore
 
 MOUNT = "/smartac_test_lfs"
 
 
 class RAMBlockDev:
     # The block device protocol os.VfsLfs2 needs (MicroPython docs, "Filesystems").
-    def __init__(self, block_size=512, blocks=128):
+    def __init__(self, block_size=512, blocks=512):
         self.block_size = block_size
         self.data = bytearray(block_size * blocks)
 
@@ -109,6 +109,32 @@ class Cases:
             s.append_event("%099d" % (per_file + 1 + i))
         old = _read(self.root + "/events.1.log").splitlines()
         self.assertEqual(int(old[0]), per_file)  # the oldest file was dropped
+
+    def test_read_events_in_chunks_across_rotation(self):
+        s = FileStore(self.root)
+        self.assertEqual(list(s.read_events()), [])
+        per_file = EVENT_LOG_BYTES // 100
+        for i in range(per_file + 3):
+            s.append_event("%099d" % i)
+        chunks = list(s.read_events())
+        self.assertTrue(all(isinstance(c, bytes) and 0 < len(c) <= READ_CHUNK for c in chunks))
+        lines = b"".join(chunks).decode().splitlines()
+        self.assertEqual([int(x) for x in lines], list(range(per_file + 3)))  # events.1.log first, oldest first
+        os.remove(self.root + "/events.1.log")
+        tail = b"".join(s.read_events()).decode().splitlines()
+        self.assertEqual([int(x) for x in tail], list(range(per_file, per_file + 3)))
+
+    def test_appends_between_chunks(self):
+        # The control task may append while the HTTP task streams: the read goes on to the new end.
+        s = FileStore(self.root)
+        for i in range(20):
+            s.append_event("%049d" % i)
+        it = s.read_events()
+        first = next(it)
+        s.append_event("%049d" % 20)
+        rest = b"".join(it)
+        lines = (first + rest).decode().splitlines()
+        self.assertEqual([int(x) for x in lines], list(range(21)))
 
     def test_boot_counter(self):
         s = FileStore(self.root)

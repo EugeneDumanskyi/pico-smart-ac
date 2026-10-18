@@ -2,14 +2,17 @@
 # Persistence (architecture.md, "Persistence and flash"). MemoryStore for the host runner and tests, FileStore for
 # the Pico's flash; both keep this API:
 #   load(name) -> parsed document or None, save(name, doc), append_event(line), next_boot() -> int,
-#   load_crash() -> text or None, save_crash(text), reset_counts(cause) -> {cause: count}
+#   load_crash() -> text or None, save_crash(text), reset_counts(cause) -> {cause: count},
+#   read_events() -> the event log as text pieces, oldest first (GET /api/log)
 # Documents: "profiles", "settings", "state" (the controller snapshot), "boot" (the boot counter),
 # "resets" (resets by cause).
 import json
 import os
 
-MAX_EVENT_LINES = 800  # about what the 2 x 16 KB rotating log holds
-EVENT_LOG_BYTES = 16 * 1024  # at least 16 KB kept: over 8 days of hourly heap lines (shell/tasks.py)
+MAX_EVENT_LINES = 1300  # about what the 2 x 64 KB rotating log holds
+# At least 64 KB kept: in shadow mode (M3) about 100 decision lines a day plus 24 hourly heap lines, so over 9 days.
+EVENT_LOG_BYTES = 64 * 1024
+READ_CHUNK = 512
 MAX_CRASH = 2048
 
 
@@ -61,6 +64,10 @@ class MemoryStore(_Store):
         self.events.append(line)
         if len(self.events) > MAX_EVENT_LINES:
             self.events.pop(0)
+
+    def read_events(self):
+        for line in self.events:
+            yield line + "\n"
 
     def load_crash(self):
         return self.crash
@@ -119,6 +126,24 @@ class FileStore(_Store):
             os.rename(path, self.root + "events.1.log")
         with open(path, "a") as f:
             f.write(line + "\n")
+
+    def read_events(self):
+        # events.1.log, then events.log, in READ_CHUNK pieces. Each piece opens and closes the file, so none is held
+        # open while the HTTP task waits on the socket and the control task appends or rotates. A rotation in
+        # between can drop or repeat lines in this read; the next one has them (tools/shadow_pull.py dedups).
+        for name in ("events.1.log", "events.log"):
+            pos = 0
+            while True:
+                try:
+                    with open(self.root + name, "rb") as f:
+                        f.seek(pos)
+                        data = f.read(READ_CHUNK)
+                except OSError:
+                    break
+                if not data:
+                    break
+                pos += len(data)
+                yield data
 
     def load_crash(self):
         try:
