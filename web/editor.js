@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Profiles tab (idea.md, "Web UI spec"). Loaded after index.html's script and uses its helpers ($, api)
+// Profiles and Settings tabs (idea.md, "Web UI spec"). Loaded after index.html's script and uses its helpers ($, api)
 // and its events: "tab" (a tab was shown) and "state" (a fresh /api/state).
-// The tab edits a copy (draft) of the document from GET; Save sends the whole document with PUT. Every input carries
+// Each tab edits a copy (draft) of the document from GET; Save sends the whole document with PUT. Every input carries
 // data-path, the JSON path the server's errors use (profiles.day.rules[0].phases[1].max_min), so an error marks its
 // field. A path with no input (e.g. ...phases, or a profile) marks the block with that data-block, or the nearest
 // block above it; one with no block at all (e.g. "$") is shown at the top of the tab.
@@ -11,6 +11,8 @@
   const LIMITS = {
     target_c: [18, 30, 0.5], max_min: [1, 120, 1], cooldown_min: [0, 480, 5], confirm_reads: [1, 10, 1],
     min_interval_min: [0, 1440, 15], temp: [10, 45, 0.5], outdoor_temp: [10, 45, 0.5], hum: [20, 95, 1],
+    poll_s: [30, 300, 10], hard_cap_min: [30, 480, 10], manual_hold_min: [10, 480, 10],
+    manual_release_off_min: [5, 240, 5], finish_fan_min: [0, 60, 5], limit_temp: [0, 60, 1], limit_hum: [0, 100, 1],
   };
   const MAX = { profiles: 10, rules: 8, conditions: 4, phases: 5 };
   const MODES = ["cool", "dry", "fan"];
@@ -295,6 +297,15 @@
       button("+", bump(1), { class: "step", tabIndex: -1, "aria-label": "more" })));
   }
 
+  function pair(ed, path, label, limits) {
+    // [low, high]: two inputs on one path, so an error on the pair marks both.
+    const f = wrap(label);
+    const lo = num(ed, path, null, limits, 0).querySelector(".in");
+    const hi = num(ed, path, null, limits, 1).querySelector(".in");
+    f.append(h("span", { class: "in" }, lo, h("span", { class: "sep" }, "–"), hi));
+    return f;
+  }
+
   function text(ed, path, label, opt = {}) {
     const input = h("input", { type: "text", value: at(ed.draft, path) ?? "", maxLength: opt.maxLength,
                                placeholder: opt.placeholder, inputMode: opt.inputMode, className: opt.cls,
@@ -315,6 +326,12 @@
       else { ed.set(path, s.value); ed.validateSoon(); }
     });
     return wrap(label, s);
+  }
+
+  function check(ed, path, label, lock) {
+    const input = h("input", { type: "checkbox", checked: !!at(ed.draft, path), disabled: !!lock, "data-path": path });
+    input.addEventListener("change", () => ed.set(path, input.checked));
+    return wrap(null, h("label", null, input, " " + label), lock && h("span", { class: "lock" }, lock));
   }
 
   function details(ed, path, head, ...body) {
@@ -538,17 +555,43 @@
     ];
   }
 
+  // --- Settings tab
+
+  function settingsView(ed) {
+    const shadow = ed.state && ed.state.shadow;
+    return [
+      h("p", { class: "hint" }, "Saved settings apply at the next tick."),
+      ed.top,
+      h("div", { class: "card grid" },
+        text(ed, "ac_ip", "AC address", { placeholder: "from secrets.py", nullIfEmpty: true }),
+        num(ed, "poll_s", "read the AC every, s", LIMITS.poll_s),
+        num(ed, "hard_cap_min", "longest cycle, min", LIMITS.hard_cap_min),
+        num(ed, "manual_hold_min", "hands off after the remote, min", LIMITS.manual_hold_min),
+        num(ed, "manual_release_off_min", "hold ends after off for, min", LIMITS.manual_release_off_min),
+        num(ed, "finish_fan_min", "fan when stopping, min", LIMITS.finish_fan_min),
+        pair(ed, "sensor_limits.temp", "trusted temp, °C", LIMITS.limit_temp),
+        pair(ed, "sensor_limits.hum", "trusted humidity, %", LIMITS.limit_hum),
+        check(ed, "dry_run", "dry run: decide, never write to the AC",
+          shadow && "locked: shadow mode runs dry whatever this says")),
+    ];
+  }
+
   const profilesEd = new Editor("Profiles", $("profiles"), "/api/profiles", profilesView,
     { validateUrl: "/api/profiles/validate", resetUrl: "/api/profiles/reset" });
+  const settingsEd = new Editor("Settings", $("settings-form"), "/api/settings", settingsView, {});
 
   document.addEventListener("tab", (ev) => {
-    if (ev.detail === "profiles" && !profilesEd.draft) profilesEd.load();
+    const ed = { profiles: profilesEd, settings: settingsEd }[ev.detail];
+    if (ed && !ed.draft) ed.load();
   });
   document.addEventListener("state", (ev) => {
-    profilesEd.state = ev.detail;
+    const s = ev.detail;
+    const shadowChanged = !!(settingsEd.state && settingsEd.state.shadow) !== !!s.shadow;
+    profilesEd.state = settingsEd.state = s;
     if (profilesEd.draft) profilesEd.guards();
+    if (shadowChanged && settingsEd.draft) settingsEd.render();
   });
   window.addEventListener("beforeunload", (ev) => {
-    if (profilesEd.dirty()) ev.preventDefault();
+    if (profilesEd.dirty() || settingsEd.dirty()) ev.preventDefault();
   });
 })();
