@@ -82,6 +82,7 @@ make micropython   # build the Unix port once, into ~/.cache/smartac/
 make lint          # ruff and the license header check
 make test          # tests/run.py on the Unix port
 make month         # the app against the simulator for 30 simulated days (SEED=1)
+make dev           # the page on http://127.0.0.1:8080 against the simulator (token dev, 10x time)
 ```
 
 ## License

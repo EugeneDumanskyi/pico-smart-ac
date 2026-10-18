@@ -4,9 +4,11 @@ RUFF_VERSION := 0.16.10
 MPY_DIR ?= $(HOME)/.cache/smartac/micropython-v1.29.0
 MICROPYTHON ?= $(MPY_DIR)/ports/unix/build-standard/micropython
 SEED ?= 1
+DEV_DIR ?= $(patsubst %/,%,$(or $(TMPDIR),/tmp))/smartac-dev
+DEV_SPEED ?= 10
 export MPY_DIR
 
-.PHONY: micropython lint test month build deploy
+.PHONY: micropython lint test month dev build deploy
 
 micropython:
 	tools/build_micropython.sh
@@ -20,6 +22,9 @@ test:
 
 month:
 	$(MICROPYTHON) sim/harness.py --days 30 --seed $(SEED) --quiet
+
+dev:
+	$(MICROPYTHON) sim/dev.py $(DEV_DIR) $(DEV_SPEED)
 
 build:
 	python3 tools/deploy.py --build
