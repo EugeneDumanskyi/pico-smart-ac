@@ -276,3 +276,19 @@ class TestLittlefs(Cases, unittest.TestCase):
 
     def tearDown(self):
         os.umount(MOUNT)
+
+    def test_flash_full_leaves_no_tmp(self):
+        s = FileStore(self.root)
+        s.save("profiles", {"v": 1})
+        # Small files, as littlefs drops a whole file that ran out of space.
+        n = 0
+        try:
+            while True:
+                _write("%s/fill%d" % (self.root, n), "x" * 512)
+                n += 1
+        except OSError:
+            pass
+        with self.assertRaises(OSError):
+            s.save("profiles", {"v": "x" * 4096})
+        self.assertEqual([x for x in os.listdir(self.root) if x.startswith("profiles")], ["profiles.json"])
+        self.assertEqual(s.load("profiles"), {"v": 1})

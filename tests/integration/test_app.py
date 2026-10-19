@@ -441,6 +441,35 @@ class TestConfigSave(unittest.TestCase):
         self.assertEqual((app.controller.state, app.controller.cycle["phase"]), (t.RUNNING, 1))  # finish: fan, off
         self.assertEqual(w.store.load("profiles")["active"], "off")
 
+    def test_reset_racing_a_tick_leaves_a_valid_profiles_json(self):
+        # The reset lands while a tick awaits its read; that tick then persists its snapshot, still on "mine".
+        w = World()
+        doc = config.default_profiles()
+        doc["profiles"]["mine"] = doc["profiles"]["day"]
+        doc["active"] = "mine"
+        w.store.save("profiles", doc)
+        app = w.app(shadow=True)
+        w.run(app, 5 * 60 * 1000)
+        app.reset_profiles()
+        app._persist(app.controller._snapshot())
+        self.assertEqual(w.store.load("profiles"), config.default_profiles())
+
+    def test_flash_full_saves_nothing(self):
+        def full(name, doc):
+            raise OSError(28)
+
+        w = World("day")
+        app = w.app(shadow=True)
+        w.run(app, 1000)
+        app.wake.clear()
+        w.store.save = full
+        failed = (500, {"ok": False, "errors": [{"path": "$", "msg": "flash write failed"}]})
+        self.assertEqual(app.save_settings(dict(config.default_settings(HOST), poll_s=120)), failed)
+        self.assertEqual(app.save_profiles(day_short(config.default_profiles())), failed)
+        self.assertEqual(app.reset_profiles(), failed)
+        self.assertEqual((app.pending, app.wake.is_set()), ({}, False))
+        self.assertEqual([d for d in flash(w.store) if d["kind"] == t.EV_CONFIG_SAVED], [])
+
     def test_reset_keeps_a_default_active_profile(self):
         w = World("night")
         app = w.app(shadow=True)

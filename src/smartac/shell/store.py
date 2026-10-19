@@ -84,6 +84,13 @@ def _exists(path):
         return False
 
 
+def _remove(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def _read(path):
     with open(path) as f:
         return f.read()
@@ -110,8 +117,13 @@ class FileStore(_Store):
 
     def save(self, name, doc):
         path = self._path(name)
-        with open(path + ".tmp", "w") as f:
-            f.write(json.dumps(doc))
+        try:
+            with open(path + ".tmp", "w") as f:
+                f.write(json.dumps(doc))
+        except OSError:
+            # Flash full: no half-written .tmp left behind, and name.json as it was.
+            _remove(path + ".tmp")
+            raise
         if _exists(path):
             os.rename(path, path + ".bak")
         os.rename(path + ".tmp", path)

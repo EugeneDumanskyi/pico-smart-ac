@@ -46,6 +46,11 @@ def _shadow_snapshot(snap):
     return snap
 
 
+def _save_failed():
+    # A save the flash couldn't take (full): the page shows the "$" error at the top of the tab.
+    return 500, {"ok": False, "errors": [{"path": "$", "msg": "flash write failed"}]}
+
+
 def _crash_line(text):
     # The last line of a traceback is the exception itself, which is what /api/state shows.
     if not text:
@@ -228,8 +233,8 @@ class App:
 
     def save_profiles(self, doc, reset=False):
         status, body, warnings = self._check_profiles(doc, reset)
-        if status == 200:
-            self._save("profiles", doc, warnings)
+        if status == 200 and not self._save("profiles", doc, warnings):
+            return _save_failed()
         return status, body
 
     def reset_profiles(self):
@@ -242,7 +247,8 @@ class App:
         errors, warnings = config.validate_settings(doc, profiles)
         if errors:
             return 400, {"ok": False, "errors": errors}
-        self._save("settings", doc, warnings)
+        if not self._save("settings", doc, warnings):
+            return _save_failed()
         return 200, {"ok": True, "warnings": warnings}
 
     def _check_profiles(self, doc, reset=False):
@@ -264,15 +270,19 @@ class App:
         return 200, {"ok": True, "warnings": warnings}, warnings
 
     def _save(self, name, doc, warnings):
-        self.store.save(name, doc)
+        # -> False when the flash write fails (full): nothing changes. self.active stays as the controller runs
+        # until the tick applies the document, or a tick under way would persist a profile the saved one lacks.
+        try:
+            self.store.save(name, doc)
+        except OSError:
+            return False
         self.pending[name] = doc
-        if name == "profiles":
-            self.active = doc["active"]
         prefix = name + "."
         self.warnings = [w for w in self.warnings if w["path"] != name and not w["path"].startswith(prefix)]
         self.warnings.extend({"path": prefix + w["path"], "msg": w["msg"]} for w in warnings)
         self._event(self._now(), EV_CONFIG_SAVED, name + " saved")
         self.wake.set()
+        return True
 
     def _configure(self, actions):
         # The saved documents, applied at the start of a tick. A profile switch it needs goes first in `actions`.
