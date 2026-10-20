@@ -149,6 +149,15 @@ M5 keeps the rest of the control API (`/api/action`, `/api/ac/test`) and the ful
 | Risks | Rejected writes misread as overrides; two controllers running at once during testing. |
 | Needs | Pico; real AC writes (owner present). |
 
+The host half ran on the branch `m4-host` (after `m6-editor`: the "config saved mid-cycle" case needs M6's save
+path), with the Pico only reading, so the two can't fight. `make supervised` runs `App(shadow=False)` from the Mac
+with each write approved at the terminal and a 15 s controller minute ([m4-checklist.md](m4-checklist.md)).
+Host half done (2026-10-20): the runner and its tests (approve, decline, a change while the prompt is open, the fault
+toggle, the routes); H1–H12 rehearsed against the simulator, all as expected; one real-AC session (H1, H8, H12),
+every write accepted and read back and the AC left as found. The other H cases stand on the simulator: they test the
+controller, not the AC. Open, for M5: F1 (`min_interval_min` is forgotten on a restart). Left: the Pico half, as one
+acceptance session with the owner once the Pico writes (P1–P4 and a short pass of the H cases on the board).
+
 ## M5: Control API and Status UI
 
 | | |
