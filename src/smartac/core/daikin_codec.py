@@ -28,6 +28,11 @@ READ_REQUEST = {
     ]
 }
 
+# Adapter and unit info (tools/daikin_check.py): firmware "ver" ("3_6_0"), unit "type" and "comm_err".
+ADAPTER = "/dsiot/edge.adp_i"
+DEVICE = "/dsiot/edge.dev_i"
+INFO_REQUEST = {"requests": [{"op": 2, "to": ADAPTER}, {"op": 2, "to": DEVICE}]}
+
 RSC_READ_OK = 2000
 RSC_WRITE_OK = 2004  # write accepted (tested)
 RSC_REJECTED = 4000  # write rejected (streamer write, tested)
@@ -187,6 +192,31 @@ def decode(response, limits=None):
         out = _int(outdoor, ("e_A00D", "p_01"), signed=True)
         out = _in_range(None if out is None else out * 5, (tenths(OUTDOOR_LIMITS[0]), tenths(OUTDOOR_LIMITS[1])))
     return Reading(ac, temp=temp, hum=hum, outdoor_temp=out)
+
+
+def parse_info(response):
+    # Parsed reply to INFO_REQUEST -> {"fw": "3.6.0", "type": "RA", "comm_err": 0}, a missing field None; None if
+    # neither part read OK. Never raises.
+    if not isinstance(response, dict) or not isinstance(response.get("responses"), list):
+        return None
+    adp = dev = None
+    for r in response["responses"]:
+        if isinstance(r, dict) and r.get("rsc") == RSC_READ_OK and isinstance(r.get("pc"), dict):
+            pn = r["pc"].get("pn")
+            if pn == "adp_i":
+                adp = r["pc"]
+            elif pn == "dev_i":
+                dev = r["pc"]
+    if adp is None and dev is None:
+        return None
+    ver = _pv(adp, "ver")
+    kind = _pv(dev, "type")
+    err = _pv(dev, "comm_err")
+    return {
+        "fw": ver.replace("_", ".") if isinstance(ver, str) else None,
+        "type": kind if isinstance(kind, str) else None,
+        "comm_err": err if isinstance(err, int) and not isinstance(err, bool) else None,
+    }
 
 
 def write_params(state):

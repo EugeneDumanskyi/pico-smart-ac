@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # HTTP routes (idea.md, "HTTP API"): GET /, /editor.js, /api/state, /api/history, /api/events, /api/log,
-# GET/PUT /api/profiles and /api/settings, POST /api/profiles/validate and /reset, POST /api/active and /api/action.
-# GETs are open on the LAN; a POST or PUT needs X-Token equal to API_TOKEN from
+# GET/PUT /api/profiles and /api/settings, POST /api/profiles/validate and /reset, POST /api/active, /api/action and
+# /api/ac/test. GETs are open on the LAN; a POST or PUT needs X-Token equal to API_TOKEN from
 # secrets.py, and with no token configured every one is refused. Unknown paths -> 404, other methods -> 405.
 # Microdot has no read timeout: a client that stops mid-request would keep its socket and task forever, so each
 # request runs under a deadline. /api/history and /api/log are streamed.
@@ -14,7 +14,7 @@ import sys
 
 from microdot import Microdot, Request, Response
 
-from smartac.core.config import OFF
+from smartac.core.config import OFF, is_ipv4
 from smartac.core.controller import FINISH, LEAVE, MAX_PAUSE_MIN
 from smartac.core.types import (
     ACT_CLEAR_MANUAL,
@@ -125,6 +125,7 @@ def make(app, www="/www", timeout_ms=REQUEST_TIMEOUT_MS, token=None):
     # -> the Microdot server; start it with `await server.start_server(host, port)`.
     web = _Server(timeout_ms)
     saving = [False]  # one config document in memory at a time
+    testing = [False]  # one AC test at a time
 
     def refused():
         return _error(401, "token missing or wrong" if token else "no API_TOKEN in secrets.py")
@@ -224,6 +225,24 @@ def make(app, www="/www", timeout_ms=REQUEST_TIMEOUT_MS, token=None):
             return _error(400, msg)
         keys = ("action", "minutes", "cycle", "profile", "rule")
         return queue({k: body[k] for k in keys if k in body})
+
+    @web.post("/api/ac/test")
+    async def ac_test(req):
+        # {"ip": "192.0.2.10"} (optional: the address in use) -> 200 {"reachable": true, "fw", "type", "comm_err",
+        # "ip", "ms"} or {"reachable": false, "error", "ip"}. Read-only; one test at a time.
+        body, err = json_object(req)
+        if err is not None:
+            return err
+        ip = body.get("ip")
+        if ip is not None and (not isinstance(ip, str) or not is_ipv4(ip)):
+            return _error(400, "ip must be an IPv4 address")
+        if testing[0]:
+            return _error(503, "busy with another test, try again")
+        testing[0] = True
+        try:
+            return await app.test_ac(ip)
+        finally:
+            testing[0] = False
 
     @web.get("/api/profiles")
     async def get_profiles(req):

@@ -42,10 +42,12 @@ def put(path, body, token=None):
     return post(path, body, token, "PUT")
 
 
-def exchange(*requests, timeout_ms=api.REQUEST_TIMEOUT_MS, shadow=False, token=None, store=None, after=None):
+def exchange(*requests, timeout_ms=api.REQUEST_TIMEOUT_MS, shadow=False, token=None, store=None, before=None,
+             after=None):
     # Start the app's server, send each raw request on its own connection. -> [(status, body) or None].
     # A request may also be `async f(port) -> reply`, for exchanges that need more than one connection.
-    # after(app): awaited once the replies are in, e.g. a tick that applies a queued action.
+    # before(app): awaited after the first tick, before any request; after(app): awaited once the replies are in,
+    # e.g. a tick that applies a queued action.
     async def main():
         clock = FakeClock()
         device = FakeDaikin(clock)
@@ -54,6 +56,8 @@ def exchange(*requests, timeout_ms=api.REQUEST_TIMEOUT_MS, shadow=False, token=N
         app = App(HostBoard(clock=clock), store or MemoryStore(), "127.0.0.1", DEFAULT_PORT, observe=observe,
                   shadow=shadow)
         await app.tick()
+        if before is not None:
+            await before(app)
         web = api.make(app, WWW, timeout_ms, token=token)
         task = asyncio.create_task(web.start_server("127.0.0.1", PORT))
         await asyncio.sleep_ms(50)
@@ -230,6 +234,48 @@ class TestAction(unittest.TestCase):
         replies = exchange(*[act(action="stop") for _ in range(MAX_ACTIONS + 1)], shadow=True, token=TOKEN)
         self.assertEqual([r[0] for r in replies], [202] * MAX_ACTIONS + [503])
         self.assertEqual(json.loads(replies[-1][1]), {"error": "busy, try again"})
+
+
+def ac_test(body, token=TOKEN):
+    return post("/api/ac/test", body, token)
+
+
+class TestACTest(unittest.TestCase):
+    def test_reachable(self):
+        replies = exchange(ac_test({}), ac_test({"ip": "127.0.0.1"}), ac_test({"ip": None}), shadow=True, token=TOKEN)
+        self.assertEqual([r[0] for r in replies], [200] * 3)
+        for _, body in replies:
+            d = json.loads(body)
+            self.assertTrue(isinstance(d.pop("ms"), int))
+            self.assertEqual(d, {"reachable": True, "fw": "3.6.0", "type": "RA", "comm_err": 0, "ip": "127.0.0.1"})
+
+    def test_refused(self):
+        replies = exchange(ac_test({"ip": "ac.local"}), ac_test({"ip": 5}), ac_test({"ip": "192.0.2.300"}),
+                           ac_test({}, None), ac_test({}, "x"), shadow=True, token=TOKEN)
+        self.assertEqual([r[0] for r in replies], [400, 400, 400, 401, 401])
+        self.assertEqual(json.loads(replies[0][1]), {"error": "ip must be an IPv4 address"})
+
+    def test_observe_mode_tests_too(self):
+        [(status, body)] = exchange(ac_test({}), token=TOKEN)
+        self.assertEqual((status, json.loads(body)["reachable"]), (200, True))
+
+    def test_one_at_a_time(self):
+        held = []
+
+        async def hold(app):
+            await app.client.lock.acquire()  # a control-task exchange under way
+            held.append(app.client.lock)
+
+        async def two(port):
+            first = asyncio.create_task(simhttp.raw(port, ac_test({})))
+            await asyncio.sleep_ms(50)
+            second = await simhttp.raw(port, ac_test({"ip": "127.0.0.1"}))
+            held[0].release()
+            return second, await first
+
+        [(second, first)] = exchange(two, shadow=True, token=TOKEN, before=hold)
+        self.assertEqual((second[0], json.loads(second[1])), (503, {"error": "busy with another test, try again"}))
+        self.assertEqual((first[0], json.loads(first[1])["reachable"]), (200, True))
 
 
 class TestEvents(unittest.TestCase):

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Async client for the adapter's /dsiot/multireq (docs/DAIKIN_API.md). One request at a time, one connection per
-# request (Connection: close), the whole exchange under a hard timeout. read() and write() never raise: any
+# request (Connection: close), the whole exchange under a hard timeout. read(), write() and info() never raise: any
 # failure is an unreachable Reading or an error string, and the core decides what it means.
 # The AC is reached by IPv4 literal only: a name would go to DNS, which blocks the loop (architecture.md).
 import asyncio
@@ -61,6 +61,15 @@ class DaikinClient:
         if err is not None:
             return Reading.unreachable(err)
         return codec.decode(doc, self.limits)
+
+    async def info(self):
+        # -> ({"fw", "type", "comm_err"}, None) or (None, why). Under the same lock as read() and write(), so a test
+        # from the page waits for the control task's exchange instead of racing it.
+        doc, err = await self._post(codec.INFO_REQUEST)
+        if err is not None:
+            return None, err
+        info = codec.parse_info(doc)
+        return (None, "bad reply") if info is None else (info, None)
 
     async def write(self, state):
         # ACState -> None if the adapter accepted it, else why. Whether it applied is for the read-back to say.

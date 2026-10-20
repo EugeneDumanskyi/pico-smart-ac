@@ -33,6 +33,12 @@ START_E3001 = {
 # Streamer (p_20) and the mold-proof candidates: readable, never writable here.
 START_E3003 = {"p_20": "00", "p_1B": "00", "p_29": "00", "p_2C": "00", "p_30": "00", "p_36": "00"}
 
+# Adapter and unit info (Settings tab, "Test connection"), shaped like the real unit's, private fields left out.
+INFO = {
+    codec.ADAPTER: {"pn": "adp_i", "pt": 1, "pch": [{"pn": "ver", "pt": 3, "pv": "3_6_0"}]},
+    codec.DEVICE: {"pn": "dev_i", "pt": 1, "pch": [{"pn": "type", "pt": 3, "pv": "RA"},
+                                                  {"pn": "comm_err", "pt": 3, "pv": 0}]},
+}
 SETPOINT_PARAMS = tuple(codec.SETPOINT_PARAM.values())
 FAN_PARAMS = tuple(codec.FAN_PARAM.values())
 TARGET_RAW = (codec.TARGET_LIMITS[0] * 2, codec.TARGET_LIMITS[1] * 2)
@@ -184,6 +190,8 @@ class FakeDaikin:
         return {"responses": [{"fr": _path(r), "rsc": rsc} for r in entries]}
 
     def _read(self, path):
+        if path in INFO:
+            return {"fr": path, "pc": INFO[path], "rsc": codec.RSC_READ_OK}
         if path == codec.INDOOR:
             root = self._indoor()
         elif path == codec.OUTDOOR:

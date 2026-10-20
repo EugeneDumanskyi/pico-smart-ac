@@ -200,6 +200,10 @@ class Gate:
             return Reading.unreachable("fault")
         return await self.client.read()
 
+    async def info(self):
+        # Settings tab, "Test connection": read-only, no approval.
+        return await self.client.info()
+
     async def write(self, state):
         app = self.app
         n = app.writes + 1

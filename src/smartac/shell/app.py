@@ -29,6 +29,7 @@ from smartac.core.types import (
 from smartac.shell.daikin import DaikinClient
 
 SETTLE_MS = 5000  # write -> read-back
+TEST_TIMEOUT_MS = 3000  # "Test connection" to an address other than the one in use
 MAX_ACTIONS = 8  # queued actions; more are refused until the next tick takes them
 MAX_CRASH_LINE = 120
 
@@ -180,6 +181,25 @@ class App:
             }
         )
         return s
+
+    async def test_ac(self, ip=None):
+        # Settings tab, "Test connection": read the adapter's info at `ip` (None: the address in use). -> the reply.
+        # The address in use goes through the running client, whose lock queues the test behind the control task's
+        # read or write, so it can't make one fail; another address gets a throwaway client.
+        client = self.client
+        if ip is None:
+            ip = None if client is None else client.ip
+        if ip is None:
+            return {"reachable": False, "error": "no AC address", "ip": None}
+        if client is None or client.ip != ip:
+            client = DaikinClient(ip, self.ac_port, timeout_ms=TEST_TIMEOUT_MS)
+        start = self.board.ticks_ms()
+        info, err = await client.info()
+        if err is not None:
+            return {"reachable": False, "error": err, "ip": ip}
+        reply = {"reachable": True, "ip": ip, "ms": ticks_since(self.board.ticks_ms(), start)}
+        reply.update(info)
+        return reply
 
     def unreachable_ms(self):
         # -> how long the AC has failed to answer, or None while it answers (or before the first read).

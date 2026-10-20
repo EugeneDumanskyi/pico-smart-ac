@@ -437,6 +437,46 @@ class TestActions(unittest.TestCase):
         self.run_with(w, app, [(5 * MIN, switch)], 6 * MIN)
         self.assertEqual((app.controller.state, app.controller.active, w.device.ac()), (t.MANUAL, "night", DRY))
 
+    def test_ac_test_during_a_write(self):
+        # The test shares the client's lock: it waits for the write's exchange instead of racing it.
+        w = World("day")
+        app = w.app()
+        write = app.client.write
+        replies = []
+
+        async def test():
+            replies.append(await app.test_ac())
+
+        async def racing(state):
+            asyncio.create_task(test())
+            await asyncio.sleep_ms(0)
+            return await write(state)
+
+        app.client.write = racing
+        w.run(app, 70 * 1000)
+        self.assertEqual((app.writes, app.write_errors, w.device.ac()), (1, 0, DRY))
+        self.assertEqual((replies[0]["reachable"], replies[0]["fw"]), (True, "3.6.0"))
+
+    def test_ac_test_addresses(self):
+        w = World()
+        w.store.save("settings", dict(config.default_settings(), ac_ip="192.0.2.1"))
+        other = w.app()  # tests 127.0.0.1 with a throwaway client
+        closed = App(HostBoard(clock=w.clock), MemoryStore(), HOST, DEFAULT_PORT + 7, shadow=True)
+
+        async def main():
+            server = await serve(w.device)
+            try:
+                return await other.test_ac(HOST), await closed.test_ac()
+            finally:
+                server.close()
+                await server.wait_closed()
+
+        good, refused = asyncio.run(main())
+        self.assertEqual((good["reachable"], good["ip"], good["type"]), (True, HOST, "RA"))
+        self.assertEqual(other.client.ip, "192.0.2.1")  # untouched
+        self.assertEqual((refused["reachable"], refused["ip"]), (False, HOST))
+        self.assertTrue(refused["error"].startswith("network error"))
+
 
 class TestConfigSave(unittest.TestCase):
     def test_running_cycle_keeps_its_rule_and_the_next_one_uses_the_saved(self):

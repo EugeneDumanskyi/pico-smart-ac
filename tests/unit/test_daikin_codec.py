@@ -427,3 +427,39 @@ class TestWriteResult(unittest.TestCase):
     def test_malformed(self):
         for resp in (None, [], {}, {"responses": []}, {"responses": [None]}, {"responses": [{"fr": "x"}]}):
             self.assertEqual(codec.write_result(resp), "malformed response")
+
+
+def _leaf(pn, pv, pt="s"):
+    return {"pn": pn, "pt": 3, "pv": pv, "md": {"pt": pt}}
+
+
+# Recorded from the owner's unit (fw 3.6.0); mac, ssid, edid, rev and region replaced, func trimmed.
+INFO_REPLY = {
+    "responses": [
+        {"fr": "/dsiot/edge.adp_i", "rsc": 2000, "pc": {"pn": "adp_i", "pt": 1, "pch": [
+            _leaf("kind", 4, "i"), _leaf("ver", "3_6_0"), _leaf("rev", "00000000"), _leaf("reg", "xx"),
+            _leaf("mac", "000000000000"), _leaf("ssid", "<ssid>"), _leaf("enlv", "2.20"),
+            _leaf("edid", "0000000000000000"), {"pn": "func", "pt": 1, "pch": [_leaf("en_ipower", 1, "i")]},
+            _leaf("api_ver", "2_2")]}},
+        {"fr": "/dsiot/edge.dev_i", "rsc": 2000, "pc": {"pn": "dev_i", "pt": 1, "pch": [
+            _leaf("pver", "03.000"), _leaf("type", "RA"), _leaf("n_inu", 1, "i"), _leaf("n_oun", 1, "i"),
+            _leaf("n_rem", 0, "i"), _leaf("comm_err", 0, "i"), _leaf("is_multi", 0, "i")]}},
+    ]
+}
+
+
+class TestParseInfo(unittest.TestCase):
+    def test_recorded_reply(self):
+        self.assertEqual(codec.parse_info(INFO_REPLY), {"fw": "3.6.0", "type": "RA", "comm_err": 0})
+
+    def test_one_part_missing(self):
+        dev_only = {"responses": [{"fr": codec.ADAPTER, "rsc": 4000}, INFO_REPLY["responses"][1]]}
+        self.assertEqual(codec.parse_info(dev_only), {"fw": None, "type": "RA", "comm_err": 0})
+
+    def test_garbage(self):
+        for doc in (None, [], {}, {"responses": None}, {"responses": [1, None, {"rsc": 2000, "pc": []}]},
+                    {"responses": [{"rsc": 4000, "pc": {"pn": "adp_i"}}]}):
+            self.assertIsNone(codec.parse_info(doc))
+        odd = {"responses": [{"rsc": 2000, "pc": {"pn": "dev_i", "pch": [{"pn": "type", "pv": 5},
+                                                                         {"pn": "comm_err", "pv": True}]}}]}
+        self.assertEqual(codec.parse_info(odd), {"fw": None, "type": None, "comm_err": None})
