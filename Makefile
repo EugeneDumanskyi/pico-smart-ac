@@ -6,9 +6,11 @@ MICROPYTHON ?= $(MPY_DIR)/ports/unix/build-standard/micropython
 SEED ?= 1
 DEV_DIR ?= $(patsubst %/,%,$(or $(TMPDIR),/tmp))/smartac-dev
 DEV_SPEED ?= 10
+M4_DIR ?= local/m4/$(shell date -u +%Y%m%d-%H%M%SZ)
+MINUTE_S ?= 15
 export MPY_DIR
 
-.PHONY: micropython lint test month dev build deploy
+.PHONY: micropython lint test month dev supervised build deploy
 
 micropython:
 	tools/build_micropython.sh
@@ -25,6 +27,10 @@ month:
 
 dev:
 	$(MICROPYTHON) sim/dev.py $(DEV_DIR) $(DEV_SPEED)
+
+# M4: DAIKIN_IP=<ac-ip> make supervised; SIM=1 for the simulator, M4_DIR=local/m4/<stamp> to restart a session.
+supervised:
+	$(MICROPYTHON) sim/supervised.py $(M4_DIR) --minute-s $(MINUTE_S) $(if $(SIM),--sim)
 
 build:
 	python3 tools/deploy.py --build

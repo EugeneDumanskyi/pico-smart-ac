@@ -40,6 +40,7 @@ the plan is in [roadmap.md](roadmap.md). Decisions: [decisions/](decisions/).
 | `sim/scenario.py` | sim | a long run generated from a seed: room, remote presses, outages, failing writes (device script); actions and power cuts (runner timeline) |
 | `sim/harness.py` | sim | the month run: the app against the simulator in virtual time, invariants checked after every step |
 | `sim/dev.py` | sim | `make dev`: fake Daikin, the app in shadow mode on a `FileStore` in a given directory, the API on 127.0.0.1:8080 serving `web/` with token `dev`, scaled time; for work on the page in a desktop browser |
+| `sim/supervised.py` | sim | `make supervised` (M4): the app writing to the real AC (`DAIKIN_IP`) or the fake one (`SIM=1`), every write approved at the terminal and checked against a fresh read; a scaled controller minute; the API plus `/run/action`, `/run/fault` (reads fail) and `/run/sim`; `session.log` with the UTC window ([m4-checklist.md](m4-checklist.md)) |
 | `web/index.html` | assets | the page: tabs (hash routing), Status, shared helpers (`api()` with the token) |
 | `web/editor.js` | assets | Profiles and Settings tabs: one render function per level, inputs tagged with the server's error paths |
 
@@ -185,7 +186,8 @@ src/                     copied to the Pico root (as .mpy, except main.py)
   lib/microdot/          vendored, pinned (docs/firmware.md)
 web/                     UI sources: index.html, editor.js; deployed to :www/ as they are until the web build exists
 sim/                     fake Daikin + room model (MicroPython, Unix port): clock, room, device, server, run.py;
-                         scenario.py + harness.py (the month run); dev.py (make dev, for the page)
+                         scenario.py + harness.py (the month run); dev.py (make dev, for the page);
+                         supervised.py (make supervised, M4 on the real AC)
 tests/run.py             test runner (Unix port)
 tests/lib/               vendored micropython-lib unittest
 tests/unit/              core tests, unittest style
@@ -194,7 +196,7 @@ tests/integration/       full app against the simulator
 tests/device/            scripts run on the Pico with mpremote
 tools/                   daikin_status.py, daikin_check.py, deploy.py, soak_log.py, shadow_pull.py (build_web.py later)
 build/                   deploy.py's .mpy output (gitignored)
-local/                   owner's backups of settings/profiles (gitignored)
+local/                   owner's backups of settings/profiles, shadow pulls, M4 sessions (gitignored)
 docs/
 ```
 
@@ -207,7 +209,7 @@ docs/
 | Unit | Unix port | codec, validation, rules, controller transitions, history | every commit (CI) |
 | Golden traces | Unix port | config + minute-by-minute readings (incl. remote changes, takeover, gaps, reboots, ticks wrap) → exact commands | every commit (CI) |
 | Simulator | Unix port: app + fake Daikin server in one process | whole app in virtual time (the board's sleep hook is the scheduler, HTTP still over 127.0.0.1): a seeded month of cycles, remote presses, outages, failing writes, actions and power cuts, checked by invariants | 3 days every commit (`make test`); 30 days in its own CI job (`make month`) |
-| Real AC from the Mac | Unix port | supervised short-timer runs; each write approved, state read back | M4 |
+| Real AC from the Mac | Unix port | `make supervised`: short timers (scaled controller minute), each write approved, state read back; the safety cases in [m4-checklist.md](m4-checklist.md), rehearsed with `SIM=1` | M4 |
 | Device | Pico | Wi-Fi drop, power cycle mid-cycle, watchdog, heap trend, flash files | per milestone; soak before v1.0 |
 
 ## Risks to watch
