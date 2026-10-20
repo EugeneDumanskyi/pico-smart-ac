@@ -174,6 +174,64 @@ class TestActive(unittest.TestCase):
         self.assertEqual([r[0] for r in replies], [202] * MAX_ACTIONS + [503])
 
 
+def act(token=TOKEN, **body):
+    return post("/api/action", body, token)
+
+
+class TestAction(unittest.TestCase):
+    def test_token_is_required(self):
+        replies = exchange(post("/api/action", {"action": "stop"}), act("x", action="stop"), shadow=True, token=TOKEN)
+        self.assertEqual([r[0] for r in replies], [401, 401])
+        [(status, body)] = exchange(act(action="stop"), shadow=True, token=None)
+        self.assertEqual((status, json.loads(body)), (401, {"error": "no API_TOKEN in secrets.py"}))
+
+    def test_bad_bodies(self):
+        bad = [
+            ({"action": "set_profile", "profile": "night"}, "unknown action"),
+            ({"action": "explode"}, "unknown action"),
+            ({}, "unknown action"),
+            ({"action": "pause", "minutes": 0}, "minutes must be 1-480 or null"),
+            ({"action": "pause", "minutes": 481}, "minutes must be 1-480 or null"),
+            ({"action": "pause", "minutes": "60"}, "minutes must be 1-480 or null"),
+            ({"action": "pause", "minutes": True}, "minutes must be 1-480 or null"),
+            ({"action": "pause", "cycle": "later"}, "cycle must be finish or leave"),
+            ({"action": "run", "profile": "nope", "rule": 0}, "unknown profile"),
+            ({"action": "run", "profile": "off", "rule": 0}, "unknown profile"),
+            ({"action": "run", "profile": "day", "rule": 2}, "rule must be an index in the profile"),
+            ({"action": "run", "profile": "day", "rule": -1}, "rule must be an index in the profile"),
+            ({"action": "run", "profile": "day"}, "rule must be an index in the profile"),
+        ]
+        replies = exchange(*[act(**b) for b, _ in bad], post("/api/action", b"[1]", TOKEN), shadow=True, token=TOKEN)
+        self.assertEqual([r[0] for r in replies], [400] * (len(bad) + 1))
+        self.assertEqual([json.loads(r[1])["error"] for r in replies[:-1]], [m for _, m in bad])
+        self.assertEqual(json.loads(replies[-1][1]), {"error": "body must be a JSON object"})
+
+    def test_observe_mode(self):
+        [(status, body)] = exchange(act(action="stop"), token=TOKEN)
+        self.assertEqual((status, json.loads(body)), (409, {"error": "no controller in observe mode"}))
+
+    def test_queues_exactly_the_action(self):
+        async def queued(app):
+            self.assertEqual(app.queue, [
+                {"action": "pause", "minutes": 60, "cycle": "leave"},
+                {"action": "pause", "minutes": None},
+                {"action": "run", "profile": "night", "rule": 1},
+                {"action": "resume"}, {"action": "stop"}, {"action": "stop_now"}, {"action": "clear_manual"},
+            ])
+
+        replies = exchange(act(action="pause", minutes=60, cycle="leave", extra=1), act(action="pause", minutes=None),
+                           act(action="run", profile="night", rule=1), act(action="resume"), act(action="stop"),
+                           act(action="stop_now"), act(action="clear_manual"), shadow=True, token=TOKEN,
+                           after=queued)
+        self.assertEqual([r[0] for r in replies], [202] * 7)
+        self.assertEqual(json.loads(replies[0][1])["state"], t.IDLE)  # the state from before the tick
+
+    def test_full_queue(self):
+        replies = exchange(*[act(action="stop") for _ in range(MAX_ACTIONS + 1)], shadow=True, token=TOKEN)
+        self.assertEqual([r[0] for r in replies], [202] * MAX_ACTIONS + [503])
+        self.assertEqual(json.loads(replies[-1][1]), {"error": "busy, try again"})
+
+
 class TestEvents(unittest.TestCase):
     def test_route(self):
         [(status, body)] = exchange(get("/api/events?limit=5"), shadow=True)

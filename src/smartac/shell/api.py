@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # HTTP routes (idea.md, "HTTP API"): GET /, /editor.js, /api/state, /api/history, /api/events, /api/log,
-# GET/PUT /api/profiles and /api/settings, POST /api/profiles/validate and /reset, and POST /api/active (brought
-# forward from M5 for shadow mode). GETs are open on the LAN; a POST or PUT needs X-Token equal to API_TOKEN from
+# GET/PUT /api/profiles and /api/settings, POST /api/profiles/validate and /reset, POST /api/active and /api/action.
+# GETs are open on the LAN; a POST or PUT needs X-Token equal to API_TOKEN from
 # secrets.py, and with no token configured every one is refused. Unknown paths -> 404, other methods -> 405.
 # Microdot has no read timeout: a client that stops mid-request would keep its socket and task forever, so each
 # request runs under a deadline. /api/history and /api/log are streamed.
@@ -15,10 +15,19 @@ import sys
 from microdot import Microdot, Request, Response
 
 from smartac.core.config import OFF
-from smartac.core.controller import FINISH, LEAVE
-from smartac.core.types import ACT_SET_PROFILE
+from smartac.core.controller import FINISH, LEAVE, MAX_PAUSE_MIN
+from smartac.core.types import (
+    ACT_CLEAR_MANUAL,
+    ACT_PAUSE,
+    ACT_RESUME,
+    ACT_RUN,
+    ACT_SET_PROFILE,
+    ACT_STOP,
+    ACT_STOP_NOW,
+)
 
 REQUEST_TIMEOUT_MS = 10000
+ACTIONS = (ACT_PAUSE, ACT_RESUME, ACT_RUN, ACT_STOP, ACT_STOP_NOW, ACT_CLEAR_MANUAL)  # set_profile: /api/active
 MAX_DOC_BODY = 17 * 1024  # config.MAX_DOC_BYTES plus room for the page's whitespace
 DRAIN_CHUNK = 512
 Request.max_content_length = MAX_DOC_BODY
@@ -59,6 +68,32 @@ def _error(status, msg):
     return {"error": msg}, status
 
 
+def _int(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _check_action(body, profiles):
+    # The shape of an /api/action body -> an error message or None. Whether it applies in the current state is for
+    # the core to say (an `ignored` event).
+    name = body.get("action")
+    if name == ACT_PAUSE:
+        minutes = body.get("minutes")
+        if minutes is not None and (not _int(minutes) or not 1 <= minutes <= MAX_PAUSE_MIN):
+            return "minutes must be 1-%d or null" % MAX_PAUSE_MIN
+        if body.get("cycle", FINISH) not in (FINISH, LEAVE):
+            return "cycle must be finish or leave"
+    elif name == ACT_RUN:
+        profile = profiles.get(body.get("profile")) if isinstance(body.get("profile"), str) else None
+        if not isinstance(profile, dict):
+            return "unknown profile"
+        i = body.get("rule")
+        if not _int(i) or not 0 <= i < len(profile.get("rules", [])):
+            return "rule must be an index in the profile"
+    elif name not in ACTIONS:
+        return "unknown action"
+    return None
+
+
 def _invalid(msg):
     return {"ok": False, "errors": [{"path": "$", "msg": msg}]}, 400
 
@@ -93,6 +128,23 @@ def make(app, www="/www", timeout_ms=REQUEST_TIMEOUT_MS, token=None):
 
     def refused():
         return _error(401, "token missing or wrong" if token else "no API_TOKEN in secrets.py")
+
+    def json_object(req):
+        # Token, then a small JSON object body. -> (body, None) or (None, error reply).
+        if not _token_ok(req.headers.get("X-Token"), token):
+            return None, refused()
+        try:
+            body = req.json
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            return None, _error(400, "body must be a JSON object")
+        return body, None
+
+    def queue(action):
+        if not app.action(action):
+            return _error(503, "busy, try again")
+        return app.status(), 202
 
     async def with_doc(req, handler):
         # Token, then the body, then handler(document) -> (status, body).
@@ -142,14 +194,9 @@ def make(app, www="/www", timeout_ms=REQUEST_TIMEOUT_MS, token=None):
     @web.post("/api/active")
     async def active(req):
         # {"profile": "night", "cycle": "finish" | "leave"} -> 202 and the state; the next tick applies it.
-        if not _token_ok(req.headers.get("X-Token"), token):
-            return refused()
-        try:
-            body = req.json
-        except ValueError:
-            body = None
-        if not isinstance(body, dict):
-            return _error(400, "body must be a JSON object")
+        body, err = json_object(req)
+        if err is not None:
+            return err
         ctl = app.controller
         if ctl is None:
             return _error(409, "no controller in observe mode")
@@ -159,9 +206,24 @@ def make(app, www="/www", timeout_ms=REQUEST_TIMEOUT_MS, token=None):
         cycle = body.get("cycle", FINISH)
         if cycle not in (FINISH, LEAVE):
             return _error(400, "cycle must be finish or leave")
-        if not app.action({"action": ACT_SET_PROFILE, "profile": name, "cycle": cycle}):
-            return _error(503, "busy, try again")
-        return app.status(), 202
+        return queue({"action": ACT_SET_PROFILE, "profile": name, "cycle": cycle})
+
+    @web.post("/api/action")
+    async def action(req):
+        # {"action": "pause", "minutes": 60 | null, "cycle": "finish" | "leave"}, {"action": "run", "profile": "day",
+        # "rule": 0}, or resume, stop, stop_now, clear_manual -> 202 and the state; the next tick applies it, and one
+        # that doesn't apply in that state becomes an `ignored` event.
+        body, err = json_object(req)
+        if err is not None:
+            return err
+        ctl = app.controller
+        if ctl is None:
+            return _error(409, "no controller in observe mode")
+        msg = _check_action(body, ctl.profiles.get("profiles", {}))
+        if msg is not None:
+            return _error(400, msg)
+        keys = ("action", "minutes", "cycle", "profile", "rule")
+        return queue({k: body[k] for k in keys if k in body})
 
     @web.get("/api/profiles")
     async def get_profiles(req):

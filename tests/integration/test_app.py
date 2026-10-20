@@ -16,6 +16,8 @@ from smartac.shell.store import MAX_EVENT_LINES, MemoryStore
 
 HOST = "127.0.0.1"
 DRY = t.ACState(True, t.MODE_DRY, None, t.FAN_AUTO)
+FAN3 = t.ACState(True, t.MODE_FAN, None, "3")
+MIN = 60 * 1000
 
 
 class Stop(Exception):
@@ -357,6 +359,83 @@ def day_short(doc):
 
 def event_times(w, kind):
     return [s[0] for s in w.steps for k, p in s[3] if k == t.CMD_EVENT and p[0] == kind]
+
+
+class TestActions(unittest.TestCase):
+    # The Status tab's buttons (POST /api/action) through real ticks. World("day") starts "humid" (dry 60 min, then
+    # fan 3 for 20, cooldown 45) at 1:00.
+    def run_with(self, w, app, actions, until_ms):
+        for at_ms, action in actions:
+            w.sched.at(at_ms, lambda a=action: app.action(a))
+        w.run(app, until_ms)
+
+    def test_pause_finish_mid_phase(self):
+        w = World("day")
+        app = w.app()
+        self.run_with(w, app, [(5 * MIN, {"action": "pause", "minutes": 60, "cycle": "finish"})], 6 * MIN)
+        self.assertEqual((app.controller.state, w.device.ac()), (t.RUNNING, FAN3))  # the rule's fan phase
+        self.assertTrue(app.status()["pause_pending"])
+        w.run(app, 27 * MIN)
+        self.assertEqual(app.controller.state, t.PAUSED)
+        self.assertFalse(w.device.ac().power)
+        self.assertEqual(w.kinds()[-3:], [t.EV_PAUSE, t.EV_PHASE, t.EV_CYCLE_END])
+
+    def test_pause_leave_then_resume(self):
+        w = World("day")
+        app = w.app()
+        self.run_with(w, app, [(5 * MIN, {"action": "pause", "minutes": None, "cycle": "leave"})], 10 * MIN)
+        self.assertEqual((app.controller.state, w.device.ac()), (t.PAUSED, DRY))  # left running
+        self.assertEqual(app.writes, 1)
+        w.device.remote(t.ACState(False, t.MODE_DRY, None, t.FAN_AUTO))
+        self.run_with(w, app, [(11 * MIN, {"action": "resume"})], 14 * MIN)
+        self.assertEqual((app.controller.state, w.kinds()[-2:]), (t.IDLE, [t.EV_PAUSE, t.EV_RESUME]))
+
+    def test_stop_runs_the_fan_phase_then_off(self):
+        w = World("day")
+        app = w.app()
+        self.run_with(w, app, [(5 * MIN, {"action": "stop"})], 6 * MIN)
+        self.assertEqual(w.device.ac(), FAN3)
+        w.run(app, 27 * MIN)
+        self.assertEqual(app.controller.state, t.COOLDOWN)
+        self.assertFalse(w.device.ac().power)
+        self.assertEqual((app.writes, app.write_errors), (3, 0))
+
+    def test_stop_now_then_run_from_cooldown(self):
+        w = World("day")
+        app = w.app()
+        self.run_with(w, app, [(5 * MIN, {"action": "stop_now"})], 7 * MIN)
+        self.assertEqual(app.controller.state, t.COOLDOWN)
+        self.assertEqual(w.device.ac().power, False)
+        self.assertEqual(app.writes, 2)  # dry, then off: no fan phase
+        self.assertFalse(t.EV_PHASE in w.kinds())
+        self.run_with(w, app, [(10 * MIN, {"action": "run", "profile": "day", "rule": 0})], 11 * MIN)
+        self.assertEqual(app.controller.state, t.RUNNING)
+        self.assertEqual(app.status()["cycle"]["rule"], "too_hot")
+        self.assertEqual(w.device.ac().mode, t.MODE_COOL)
+
+    def test_a_refused_action_is_an_ignored_event(self):
+        w = World("day")
+        app = w.app()
+        self.run_with(w, app, [(5 * MIN, {"action": "run", "profile": "day", "rule": 0})], 6 * MIN)
+        self.assertEqual(w.kinds()[-1], t.EV_IGNORED)
+        self.assertEqual(app.event_rows(1)[0]["msg"], "run ignored in RUNNING")
+
+    def test_clear_manual_takes_over(self):
+        w = World("day")
+        w.device.remote(t.ACState(True, t.MODE_COOL, 240, "2"))
+        app = w.app()
+        w.run(app, 2 * MIN)
+        self.assertEqual(app.controller.state, t.MANUAL)
+        self.run_with(w, app, [(3 * MIN, {"action": "clear_manual"})], 4 * MIN)
+        self.assertEqual(app.controller.state, t.TAKEOVER)
+        self.assertEqual(w.device.ac(), t.ACState(True, t.MODE_FAN, None, "2"))
+
+    def test_switch_with_leave_hands_the_run_over(self):
+        w = World("day")
+        app = w.app()
+        switch = {"action": "set_profile", "profile": "night", "cycle": "leave"}
+        self.run_with(w, app, [(5 * MIN, switch)], 6 * MIN)
+        self.assertEqual((app.controller.state, app.controller.active, w.device.ac()), (t.MANUAL, "night", DRY))
 
 
 class TestConfigSave(unittest.TestCase):
