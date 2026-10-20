@@ -87,6 +87,15 @@ class RuleSelector:
         left = rule.get("min_interval_min", 0) * 60 * 1000 - ticks_since(now, then)
         return left if left > 0 else 0
 
+    def within(self, rules, now):
+        # Names of the rules still inside their min_interval_min, in rule order (the snapshot's "intervals").
+        return [r["name"] for r in rules if self.interval_left_ms(r, now)]
+
+    def restart(self, names, now):
+        # After a restart elapsed time is unknown: each named rule's interval runs again in full (ADR 0004).
+        for name in names:
+            self.starts[name] = now
+
     def observe(self, rules, reading, now):
         # Count this reading, then return the index of the rule to start, or None.
         # Rules are checked in order:

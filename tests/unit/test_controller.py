@@ -1141,9 +1141,25 @@ class TestBoot(unittest.TestCase):
         self.assertEqual(summary(cmds), [("event", t.EV_PHASE), ("write", OFF_AC), ("persist",)])
         self.assertFalse(rig.status()["booting"])
 
+    def test_intervals_restart_in_full(self):
+        damp = rule("damp", cond("hum", ">", 75), [phase("dry", 30)], interval=60)
+        idle = {"v": 2, "state": "IDLE", "profile": "test", "cycle": None, "expected": None, "written": None,
+                "pause": None, "intervals": ["damp"]}
+        rig = self.boot(idle, OFF_AC, rules=[damp])
+        rig.hum = 80
+        self.assertEqual(rig.polls(60), [])  # the first poll decides the boot: the interval runs from there
+        self.assertEqual(rig.ctl._snapshot(rig.now)["intervals"], ["damp"])
+        self.assertEqual(events(rig.poll()), [t.EV_CYCLE_START])
+        # A v1 snapshot has none; another profile's names are dropped.
+        for snap in (dict(idle, v=1, intervals=None), dict(idle, profile="other")):
+            rig = self.boot(snap, OFF_AC, rules=[damp])
+            rig.hum = 80
+            self.assertEqual(events(rig.poll()), [t.EV_CYCLE_START])
+
     def test_bad_snapshots(self):
         good, _ = snapshot_of(lambda r: r.start_hot())
-        bad = [None, {}, {"v": 2, "state": "RUNNING"}, {"v": 1, "state": "NOPE"}, {"v": 1, "state": "RUNNING"}, []]
+        bad = [None, {}, {"v": 3, "state": "RUNNING"}, {"v": 1, "state": "NOPE"}, {"v": 1, "state": "RUNNING"}, []]
+        bad.append(dict(good, intervals="damp"))
         broken = json.loads(json.dumps(good))
         broken["cycle"]["phase"] = 5
         bad.append(broken)
@@ -1279,9 +1295,9 @@ class TestPersist(unittest.TestCase):
         rig.start_hot()
         snap = rig.snap
         self.assertEqual(
-            sorted(snap.keys()), ["cycle", "expected", "pause", "profile", "state", "v", "written"]
+            sorted(snap.keys()), ["cycle", "expected", "intervals", "pause", "profile", "state", "v", "written"]
         )
-        self.assertEqual(snap["v"], 1)
+        self.assertEqual(snap["v"], 2)
         self.assertEqual(snap["cycle"]["kind"], "rule")
         self.assertEqual(snap["cycle"]["cooldown_min"], 30)
         self.assertEqual(snap["cycle"]["hard_cap_min"], 120)

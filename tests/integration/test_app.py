@@ -451,7 +451,7 @@ class TestConfigSave(unittest.TestCase):
         app = w.app(shadow=True)
         w.run(app, 5 * 60 * 1000)
         app.reset_profiles()
-        app._persist(app.controller._snapshot())
+        app._persist(app.controller._snapshot(app._now()))
         self.assertEqual(w.store.load("profiles"), config.default_profiles())
 
     def test_flash_full_saves_nothing(self):
@@ -484,7 +484,7 @@ class TestConfigSave(unittest.TestCase):
         w = World()
         app = w.app(shadow=True)
         app.save_profiles(day_short(config.default_profiles()))
-        app._persist(dict(app.controller._snapshot(), profile="day"))  # a tick already under way
+        app._persist(dict(app.controller._snapshot(app._now()), profile="day"))  # a tick already under way
         self.assertEqual(w.store.load("profiles"), dict(day_short(config.default_profiles()), active="day"))
 
     def test_shadow_keeps_the_owner_dry_run_in_the_file(self):

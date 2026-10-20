@@ -50,7 +50,7 @@ from smartac.core.types import (
     ticks_since,
 )
 
-SNAPSHOT_VERSION = 1
+SNAPSHOT_VERSION = 2  # 2 added "intervals"; a v1 snapshot is read as having none
 MIN_MS = 60 * 1000
 UNREACHABLE_MISSES = 3  # consecutive failed poll reads before EV_UNREACHABLE
 MAX_PAUSE_MIN = 480  # longest timed pause; "until resumed" has no timer
@@ -171,10 +171,11 @@ class Controller:
         self.misses = 0
         self.queued = []  # actions held over a read-back step or until boot is decided
         self.why = None  # why the last phase ended, for the off write's event; messages only, not persisted
+        self.intervals = []  # restored rule names whose min_interval restarts when boot is decided
         self.booting = snapshot is not None
         if snapshot is not None:
             self._restore(snapshot)
-        self._persisted = self._snapshot()
+        self._persisted = self._snapshot(now)
 
     def configure(self, profiles=None, settings=None):
         # New config documents. A running cycle keeps the copies it took at its start.
@@ -191,7 +192,7 @@ class Controller:
             if ac is not None and not self.booting and self.state in OWNED and self.written is not None:
                 self._judge(now, ac, out, True)
             self.queued.extend(actions)
-            self._persist(out)
+            self._persist(now, out)
             return out
 
         if ac is None:
@@ -220,7 +221,7 @@ class Controller:
         self._advance(now, reading, out)
         if ac is not None and self.state in OWNED:
             self._write(now, out)
-        self._persist(out)
+        self._persist(now, out)
         return out
 
     def status(self, now):
@@ -463,6 +464,8 @@ class Controller:
     def _resolve_boot(self, now, ac, out):
         # The first reachable read after a restart decides what the restored state means (ADR 0003, 0004).
         st = self.state
+        self.selector.restart(self.intervals, now)
+        self.intervals = []
         if self.pause is not None and self.pause["minutes"] is not None:
             self.pause["since"] = now  # the full pause again
         if st == COOLDOWN:
@@ -691,8 +694,10 @@ class Controller:
     def _event(self, out, kind, msg):
         out.append((CMD_EVENT, (kind, msg)))
 
-    def _snapshot(self):
-        # What state.json holds: no stamps (elapsed time is unknown after a restart, ADR 0004).
+    def _snapshot(self, now):
+        # What state.json holds: no stamps (elapsed time is unknown after a restart, ADR 0004). "intervals": the
+        # active profile's rules still inside min_interval_min, restarted in full after a reboot; it changes when
+        # a cycle starts and when an interval runs out.
         cycle = None
         if self.cycle is not None and self.state in OWNED + (COOLDOWN,):
             cycle = dict(self.cycle)
@@ -707,10 +712,11 @@ class Controller:
             "expected": _ac_list(self.expected),
             "written": _ac_list(self.written),
             "pause": pause,
+            "intervals": self.intervals if self.booting else self.selector.within(self._rules(), now),
         }
 
-    def _persist(self, out):
-        snap = self._snapshot()
+    def _persist(self, now, out):
+        snap = self._snapshot(now)
         if snap != self._persisted:
             self._persisted = snap
             out.append((CMD_PERSIST, snap))
@@ -720,7 +726,10 @@ class Controller:
         # The active profile comes from profiles.json; the snapshot's "profile" is informational.
         try:
             state = snap["state"]
-            if snap.get("v") != SNAPSHOT_VERSION or state not in STATES:
+            if snap.get("v") not in (1, SNAPSHOT_VERSION) or state not in STATES:
+                return
+            intervals = snap.get("intervals") or []
+            if not isinstance(intervals, list) or not all(isinstance(n, str) for n in intervals):
                 return
             cycle = expected = written = pause = None
             if state in OWNED or state == COOLDOWN:
@@ -757,3 +766,5 @@ class Controller:
         self.expected = expected
         self.written = written
         self.pause = pause
+        if snap.get("profile") == self.active:  # names of another profile's rules mean nothing here
+            self.intervals = intervals
