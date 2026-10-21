@@ -299,7 +299,7 @@ class TestShadow(unittest.TestCase):
         s = app.status()
         self.assertEqual((s["shadow"], s["dry_run"], s["profile"], s["state"]), (True, True, "day", t.IDLE))
         self.assertEqual([p["name"] for p in s["profiles"]], ["away", "day", "night"])
-        self.assertEqual(s["profiles"][1], {"name": "day", "label": "Day"})
+        self.assertEqual(s["profiles"][1], {"name": "day", "label": "Day", "rules": ["too_hot", "humid"]})
         self.assertFalse(app.settings["dry_run"])  # settings.json itself is left as it is
         json.dumps(s)
 

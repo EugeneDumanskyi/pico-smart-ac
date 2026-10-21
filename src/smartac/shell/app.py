@@ -167,7 +167,14 @@ class App:
                 },
                 "dry_run": self._settings()["dry_run"],
                 "shadow": self.shadow,
-                "profiles": [{"name": k, "label": profiles[k].get("label", k)} for k in sorted(profiles)],
+                "profiles": [
+                    {
+                        "name": k,
+                        "label": profiles[k].get("label", k),
+                        "rules": [r.get("name") for r in profiles[k].get("rules", [])],
+                    }
+                    for k in sorted(profiles)
+                ],
                 "last_error": None if r is None else r.error,
                 "unreachable_s": None if unreachable is None else unreachable // 1000,
                 "config_warning": "%s: %s" % (w[0]["path"], w[0]["msg"]) if w else None,
