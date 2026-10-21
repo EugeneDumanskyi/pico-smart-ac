@@ -31,7 +31,7 @@ From the design review, 2026-10-08.
 | D2 | An AC we didn't start gets a manual hold, then a takeover (fan, then off) if it's still on. | [ADR 0003](decisions/0003-ac-ownership.md) |
 | D3 | No backstop when the owner switches the Pico off mid-cycle: the AC is then under remote control. The AC's off-timer is not used. | [ADR 0003](decisions/0003-ac-ownership.md) |
 | D4 | Relative time only: no NTP, calendar or time windows; profiles chosen by hand. | [ADR 0004](decisions/0004-time.md) |
-| D5 | Pausing or switching to `off` during a cycle offers *finish* or *leave running*. | [ADR 0003](decisions/0003-ac-ownership.md) |
+| D5 | Pausing or switching profile during a cycle offers *finish* or *leave running* (any profile since M5). | [ADR 0003](decisions/0003-ac-ownership.md) |
 | D6 | `use` rule pointers dropped; profiles list their own rules. | [idea.md](idea.md#profilesjson) |
 | D7 | File-level OTA updates move to v1.1; v1.0 is updated over USB. | [ADR 0001](decisions/0001-language.md) |
 
@@ -170,6 +170,22 @@ acceptance session with the owner once the Pico writes (P1–P4 and a short pass
 | Dependencies | M4. |
 | Risks | RAM spikes while serving assets (stream files). |
 | Needs | Pico; real AC for acceptance. |
+
+M5 is built on the host first too, on the branch `m5-control` (after `m4-host`), against the simulator. Settled with
+the owner on 2026-10-21: F1 from the M4 checklist is fixed (a restart restarts each rule's `min_interval_min` in full,
+ADR 0004); the LED needs no new pattern (M1's: dark while healthy, steady when the AC doesn't answer, fast blink
+without Wi-Fi; the Settings tab says which it shows); `/api/action` answers 202 like `/api/active`, and the page shows
+an `ignored` event; `/api/ac/test` tests the typed address, through the running client's lock when it is the same one;
+finish/leave is asked for pause and for any profile switch while a phase runs.
+Done so far (2026-10-21): the routes and their tests (token, every bad field, observe mode, a full queue, one AC test at
+a time, gzip or plain page); every action through real ticks against the simulator; the Status tab and Test
+connection checked in headless Chrome at 390 px against `make dev DEV_LIVE=1` (each button in a state it applies to,
+disabled in the others, the dialog, an `ignored` event, a good and a wrong address); `tools/build_web.py`: 15.5 KB
+gzipped of the 60 KB budget; the supervised runner uses `/api/action`.
+
+Left, after M3's week is reviewed, in the same Pico session as M6 and M4's Pico half: deploy; heap while serving the
+gzipped page; the phone checklist in shadow mode (every button → its event, no token → 401, Test connection with the
+real and a wrong address); then M4's P1–P4 driven by the buttons; merge.
 
 ## M6: Profile and settings editor
 

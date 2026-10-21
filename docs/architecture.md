@@ -25,11 +25,11 @@ the plan is in [roadmap.md](roadmap.md). Decisions: [decisions/](decisions/).
 | `core/controller.py` | core | state machine: `step(now, reading, actions) → commands`; owns cycle, stopping, cooldown, manual hold, takeover, pause |
 | `core/history.py` | core | 1440 × 1-min ring buffer in preallocated `array`s; streamed JSON export |
 | `core/events.py` | core | event ring (200), each event with the reading it was decided on; marks which events go to flash (more in shadow mode) and owns the `events.log` line format |
-| `shell/daikin.py` | shell | async HTTP POST to `/dsiot/multireq`, hard timeout, one request at a time, IPv4 literal only (no DNS); never raises |
+| `shell/daikin.py` | shell | async HTTP POST to `/dsiot/multireq`, hard timeout, one request at a time (a lock: the Settings tab's AC test on the address in use waits for the control task's read or write), IPv4 literal only (no DNS); never raises |
 | `shell/store.py` | shell | one API, two stores: `MemoryStore` (documents kept as JSON text) on the host, `FileStore` on flash (atomic `.tmp` → rename with `.bak`, rotating event log read back in 512-byte pieces, crash log, boot and reset counters) |
 | `shell/net.py` | shell | Wi-Fi supervisor: reconnect with backoff, the unreachable-AC policy, counters; pure timing over the board and the app |
 | `shell/tasks.py` | shell | the watchdog and housekeeping tasks; `run()` starts all tasks and turns an uncaught exception into `crash.txt` and a reset |
-| `shell/api.py` | shell | Microdot routes from idea.md, token check, body size limits (config documents read from the stream after the token check, one at a time), streamed responses |
+| `shell/api.py` | shell | Microdot routes from idea.md, token check, body size limits (config documents read from the stream after the token check, one at a time), streamed responses; the page's files as their `.gz` copy (`Content-Encoding: gzip`) when the client takes gzip, else plain |
 | `shell/app.py` | shell | boot from the store, the control task, the action queue, `/api/state`; `_step` is the seam the runner watches. Observe mode (M1) builds no controller: a tick only reads and records history. Shadow mode (M3) forces `dry_run` on the controller and on a restored cycle, and a write that still comes out is logged as `blocked`, never sent. Config saves (M6): validate, save to the store, park in `pending` for the next tick |
 | `board/base.py` | shell | `Board` interface: ticks, `wait(event, ms)` (all sleeps go through it), Wi-Fi link, watchdog, LED, reset, reset cause |
 | `board/pico.py`, `board/host.py` | shell | real hardware / any clock plus a ticks offset, no-op hardware, and a sleep hook for virtual time on the Unix port |
@@ -40,7 +40,7 @@ the plan is in [roadmap.md](roadmap.md). Decisions: [decisions/](decisions/).
 | `sim/scenario.py` | sim | a long run generated from a seed: room, remote presses, outages, failing writes (device script); actions and power cuts (runner timeline) |
 | `sim/harness.py` | sim | the month run: the app against the simulator in virtual time, invariants checked after every step |
 | `sim/dev.py` | sim | `make dev`: fake Daikin, the app in shadow mode on a `FileStore` in a given directory, the API on 127.0.0.1:8080 serving `web/` with token `dev`, scaled time; for work on the page in a desktop browser |
-| `sim/supervised.py` | sim | `make supervised` (M4): the app writing to the real AC (`DAIKIN_IP`) or the fake one (`SIM=1`), every write approved at the terminal and checked against a fresh read; a scaled controller minute; the API plus `/run/action`, `/run/fault` (reads fail) and `/run/sim`; `session.log` with the UTC window ([m4-checklist.md](m4-checklist.md)) |
+| `sim/supervised.py` | sim | `make supervised` (M4): the app writing to the real AC (`DAIKIN_IP`) or the fake one (`SIM=1`), every write approved at the terminal and checked against a fresh read; a scaled controller minute; the API (the Status tab's buttons, `/api/action`) plus `/run/fault` (reads fail) and `/run/sim`; `session.log` with the UTC window ([m4-checklist.md](m4-checklist.md)) |
 | `web/index.html` | assets | the page: tabs (hash routing), Status, shared helpers (`api()` with the token) |
 | `web/editor.js` | assets | Profiles and Settings tabs: one render function per level, inputs tagged with the server's error paths |
 
@@ -91,7 +91,7 @@ didn't set → `MANUAL`; while a write is pending, the unchanged previous state 
 | File | Written when | Approx. writes/day |
 |---|---|---|
 | `profiles.json`, `settings.json` (+ `.bak`) | user saves | ~0 |
-| `state.json` (cycle owner, expected AC state, pause, boot counter) | state transitions only | ≤ 50 |
+| `state.json` (cycle owner, expected AC state, pause, rules inside their interval) | state transitions, an interval running out | ≤ 50 |
 | `events.log` (rotating, 2 × 64 KB; boot counter, uptime and the reading, no timestamps) | cycle end, config save, override, takeover, failed write, reboot; an hourly `heap` line. Shadow mode adds cycle start, phase, would, hard cap, profile, unreachable, blocked | ≤ 75 (shadow ≤ 150) |
 | `crash.txt` (the last traceback) | after an uncaught exception | ~0 |
 | `boot.json`, `resets.json` (+ `.bak`) | once per boot: boot counter, resets by cause | a few |
@@ -129,7 +129,8 @@ The repo holds code and templates only. Every personal value lives on the owner'
 - Needed before the web UI works → `secrets.py`. Everything else → `settings.json`, edited in the UI
   (`ac_ip` starts as `DAIKIN_IP`).
 - `tools/deploy.py` compiles `src/smartac` and `src/lib` to `.mpy` (pinned `mpy-cross`) and copies them, `main.py`,
-  `secrets.py` and the page; stale files in its own directories (`/smartac`, `/lib`, `/www`) are removed. It refuses to
+  `secrets.py` and the page (`tools/build_web.py`: each file plus a deterministic `gzip -9` copy, failing over the
+  60 KB gzipped budget, which CI checks too); stale files in its own directories (`/smartac`, `/lib`, `/www`) are removed. It refuses to
   run without `secrets.py` and never writes or removes the app's files on the Pico. `deploy.py --backup` copies them
   into `local/`.
 - Missing `secrets.py` on the Pico: no Wi-Fi, a fixed LED error pattern and a message on USB serial.

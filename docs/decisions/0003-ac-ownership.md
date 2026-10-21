@@ -31,7 +31,7 @@ also mid-cycle. Automation must never fight a human, and must not let a forgotte
    never landed, or a stop was under way), the cycle just ends: off, then cooldown. If it doesn't match, rule 4 applies.
 8. **No backstop when the Pico is off.** Switching the Pico off mid-cycle leaves the AC to the remote. The AC's own
    off-timer is not used.
-9. **Pausing or switching to `off` during a cycle** asks the user: *finish* (fan, then off) or *leave running*
+9. **Pausing or switching profile during a cycle** asks the user: *finish* (fan, then off) or *leave running*
    (we give up ownership; the AC is treated as a human's run once automation is active again). A finish ends without
    the cycle's cooldown. If a human changes the AC during a pause's finish, we let go and go straight to `PAUSED`.
 

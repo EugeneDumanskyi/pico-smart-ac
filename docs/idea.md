@@ -155,8 +155,9 @@ hold.
 `min_interval_min`. **Stop** ends a running cycle the way "finish" does (fan phase, then off); **Stop now** writes off
 at once.
 
-**PAUSED** is set from the web page (1 h, 2 h, 8 h, or until resumed). Pausing, or switching to the `off` profile,
-while a cycle runs asks what to do with the AC:
+**PAUSED** is set from the web page (1 h, 2 h, 8 h, or until resumed). Pausing, or switching to any other profile,
+while a phase runs (`RUNNING`, `TAKEOVER`) asks what to do with the AC (in `STOPPING` it is going off anyway, so the
+page doesn't ask):
 - **finish**: fan phase, then off (the default button);
 - **leave running**: the Pico stops controlling and leaves the AC as it is (it becomes a human's run).
 
@@ -288,12 +289,18 @@ The Pico sends ages and durations in seconds; the page turns them into clock tim
   `COOLDOWN` (minutes left) / `MANUAL` (hands off, minutes left) / `TAKEOVER` / `PAUSED` (minutes left).
 - Buttons:
   - **Profile switcher** (dropdown: off, each profile).
-  - **Pause 1 h / 2 h / 8 h / until resumed**, **Resume**. While a cycle runs, pause and "off" ask:
-    *finish* or *leave running*.
-  - **Run now**: pick a rule and start it immediately, skipping the trigger.
-  - **Stop**: finish with a fan phase, then off. **Stop now**: off immediately.
+  - **Pause 1 h / 2 h / 8 h / until resumed**, **Resume**. While a phase runs, pause and a profile switch ask:
+    *finish* (default) or *leave running*.
+  - **Run now**: pick a profile and a rule (with its plain-language summary) and start it immediately, skipping the
+    trigger.
+  - **Stop**: finish with a fan phase, then off. **Stop now**: off immediately (with a confirm).
   - **Clear manual hold**.
-- Last error (e.g. "AC not reachable for 12 min").
+  - Each button is enabled only in the states the controller accepts it in (Pause: not `PAUSED`; Resume: `PAUSED` or a
+    pause waiting for the cycle to end; Run: `IDLE` or `COOLDOWN` with the AC reachable and off; Stop: `RUNNING`,
+    `MANUAL`, `TAKEOVER`; Stop now: `RUNNING`, `TAKEOVER`, `MANUAL` with the AC on; Clear: `MANUAL`). All are disabled
+    in observe mode, and all but Pause until the first AC read after a boot. An action that still doesn't apply (the
+    state changed meanwhile) shows its `ignored` event next to the buttons.
+- Errors: unreachable time, the last failed write, a config warning. Badges for shadow mode and dry run.
 
 **Profiles** (editor)
 - List of profiles; each expands to its rules; each rule to its trigger and phases.
@@ -308,8 +315,9 @@ The Pico sends ages and durations in seconds; the page turns them into clock tim
 - Event list: cycle start/end, phase changes, manual override detected, takeover, errors, config saved, reboots.
 
 **Settings**
-- Everything in `settings.json`; AC IP with a "test connection" button.
-- Device info: firmware version, uptime, free memory, Wi-Fi RSSI, IP, reconnect and reset counters.
+- Everything in `settings.json`; AC IP with a "test connection" button (tests the address typed, saved or not).
+- Device info: firmware version, uptime, free memory, Wi-Fi RSSI, IP, reconnect and reset counters, and what the LED
+  shows (dark while healthy, steady when the AC doesn't answer, fast blink without Wi-Fi).
 
 ### HTTP API
 
@@ -333,8 +341,8 @@ Large responses (`/api/history`, the UI files) are streamed in chunks. Times are
 | `GET /api/settings` | | `settings.json` (in shadow mode the saved `dry_run`, not the forced one) |
 | `PUT /api/settings` | whole document | as PUT profiles |
 | `POST /api/active` | `{"profile": "away", "cycle": "finish"}` (`cycle`: `finish` or `leave`, used only if a cycle runs; default `finish`) | 202 and the state; the next tick applies it. 401 without the right token (always, if `API_TOKEN` is unset), 400 for an unknown profile or `cycle`, 503 if the action queue is full |
-| `POST /api/action` | `{"action": "pause", "minutes": 120, "cycle": "finish"}` (`minutes: null` = until resumed), `{"action": "resume"}`, `{"action": "run", "profile": "...", "rule": 0}`, `{"action": "stop"}`, `{"action": "stop_now"}`, `{"action": "clear_manual"}` | new state |
-| `POST /api/ac/test` | | AC reachability and fw version |
+| `POST /api/action` | `{"action": "pause", "minutes": 120, "cycle": "finish"}` (`minutes` 1–480, or null = until resumed; `cycle` as above), `{"action": "resume"}`, `{"action": "run", "profile": "day", "rule": 0}` (`rule`: index in the profile), `{"action": "stop"}`, `{"action": "stop_now"}`, `{"action": "clear_manual"}` | 202 and the state; the next tick applies it, and one that doesn't apply in that state becomes an `ignored` event. 401 as above, 400 for an unknown action or a bad field, 409 in observe mode, 503 if the action queue is full |
+| `POST /api/ac/test` | `{"ip": "192.0.2.10"}` (optional; default the address in use) | 200 `{"reachable": true, "ip": "192.0.2.10", "fw": "3.6.0", "type": "RA", "comm_err": 0, "ms": 140}` or `{"reachable": false, "ip": ..., "error": "timeout"}`; read-only on the AC. 401 as above, 400 for an address that isn't IPv4, 503 while another test runs |
 
 Config documents (`/api/profiles`, `/api/settings`):
 - Every POST and PUT needs the token, `/validate` included; the GETs are open.
@@ -362,7 +370,9 @@ Config documents (`/api/profiles`, `/api/settings`):
   "ac": {"reachable": true, "power": true, "mode": "dry", "target_c": null, "fan": "auto"},
   "dry_run": false,
   "shadow": false,
-  "profiles": [{"name": "away", "label": "Away"}, {"name": "day", "label": "Day"}, {"name": "night", "label": "Night"}],
+  "profiles": [{"name": "away", "label": "Away", "rules": ["damp"]},
+               {"name": "day", "label": "Day", "rules": ["too_hot", "humid"]},
+               {"name": "night", "label": "Night", "rules": ["warm", "humid"]}],
   "last_error": null,
   "config_warning": null,
   "device": {"uptime_s": 86400, "boot": 7, "heap_free": 150000, "heap_max_block": 90000, "rssi": -60,

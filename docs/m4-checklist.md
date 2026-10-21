@@ -37,15 +37,16 @@ make supervised SIM=1                        # the same against the simulator, f
 - **Controls**, from a second terminal (token `dev`):
 
   ```sh
-  run()  { curl -s -X POST -H 'X-Token: dev' -d "$2" http://127.0.0.1:8080$1; echo; }
-  run /run/action '{"action": "run", "profile": "m4", "rule": 0}'  # also stop, stop_now, pause, resume, clear_manual,
-                                                                  # set_profile
+  run()  { curl -s -X POST -H 'X-Token: dev' -H 'Content-Type: application/json' -d "$2" http://127.0.0.1:8080$1; echo; }
+  run /api/action '{"action": "run", "profile": "m4", "rule": 0}'  # also stop, stop_now, pause, resume, clear_manual
+  run /api/active '{"profile": "off", "cycle": "finish"}'          # a profile switch
   run /run/fault '{"read": "unreachable"}'                        # reads fail until {"read": "ok"}
   run /run/sim '{"remote": {"power": true, "mode": "cool", "target_c": 24, "fan": "auto"}}'  # SIM=1 only: a remote
   run /run/sim '{"unreachable": 3}'                               # SIM=1 only: the fake AC silent for 3 real minutes
   ```
 
-  The Status page is on `http://127.0.0.1:8080/`, and the editor's `PUT /api/profiles` works as on the Pico.
+  The Status page is on `http://127.0.0.1:8080/`: its buttons send the same actions, and the editor's
+  `PUT /api/profiles` works as on the Pico. Each queued action is recorded in `session.log`.
 - **Ctrl-C** reads the AC. If it is on, the runner prints it and offers an off write (default: leave it, the
   "Pico switched off mid-cycle" case).
 - **Before each real session:** the cases and the writes they make are agreed; afterwards
@@ -89,8 +90,9 @@ pass of the H cases on the Pico are left for one acceptance session once the Pic
 
 - **F1: `min_interval_min` doesn't survive a restart.** The rule selector keeps each rule's last start in RAM as
   monotonic ms, so after a reboot every rule may start again at once (H7a: the trigger ran again 3 min after the
-  resumed cycle ended, inside its 60 min interval). Cooldown, hold and the hard cap are unaffected. Open, decided in
-  M5: persist the stamp (needs wall time, which the Pico only has after NTP) or document it as accepted, like the RAM history.
+  resumed cycle ended, inside its 60 min interval). Cooldown, hold and the hard cap are unaffected. Fixed in M5:
+  `state.json` lists the active profile's rules still inside their interval, and after a restart each one's interval
+  runs again in full (ADR 0004), so a restart can only delay a start. Golden trace `reboot_min_interval`.
 
 The Pico half adds, once the Pico writes:
 
