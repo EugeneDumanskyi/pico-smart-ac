@@ -86,7 +86,7 @@ and a tick only reads the AC and records history, so the write path can't be rea
 `tools/deploy.py` and `tools/soak_log.py`; deployed, with the watchdog and crash checks passed on the device.
 The day soak passed on 2026-10-18 ([firmware.md](firmware.md#tested-on-the-device)): 20 h on one boot, no reset,
 heap flat, 0 writes. **M1 is done.** Moved on 2026-10-17, as the owner can't keep a computer running for 3 days: the multi-day soak
-goes to M3, which runs a week anyway and is recorded on the Pico itself (an hourly `heap` line in `events.log`);
+goes to M3, which runs for days anyway and is recorded on the Pico itself (an hourly `heap` line in `events.log`);
 the Wi-Fi drop test (router restart) goes to M4's safety checklist, where the owner is present.
 
 ## M2: Core logic on the host
@@ -110,7 +110,7 @@ the Wi-Fi drop test (router restart) goes to M4's safety checklist, where the ow
 | Scope | M2 core on the Pico, `profiles.json`/`settings.json` from flash (edited by file copy), `dry_run`: commands become events (`would set dry, fan auto`). Brought forward from M5: `POST /api/active` (with the token) and a profile dropdown, `GET /api/events`; new: `GET /api/log` and `tools/shadow_pull.py`. |
 | Out of scope | Writes to the AC, editor UI. |
 | Deliverables | Shadow event log; `tools/shadow_pull.py`; a short tuning note in `idea.md` (thresholds, confirm reads). |
-| Done when | 7 nights of normal use in shadow mode; every "would" decision reviewed against the history and judged sensible; remote use correctly seen as "human". Doubles as the long soak (moved from M1): no unexplained reset, and the hourly `heap` lines in `events.log` flat over the week. |
+| Done when | At least 4 nights of normal use in shadow mode; every "would" decision reviewed against the history and judged sensible; remote use correctly seen as "human". Doubles as the long soak (moved from M1): no unexplained reset, and the hourly `heap` lines in `events.log` flat over the run. |
 | Dependencies | M1, M2. |
 | Risks | Readings while off (S1) make triggers useless → external sensor moves into v1.0. |
 | Needs | Pico; real AC read only. |
@@ -122,17 +122,20 @@ would not be sent: it becomes a `blocked` event, and `writes` stays 0. Decisions
 humidity it was made on, and `phase` and the last `would` say why a phase ended (`goal hum <= 65` or `45 min`). The log
 is 2 × 64 KB, at least 9 days.
 
-The week:
+The run (4 nights or more; shortened from 7 on 2026-10-21, see the note after the list):
 1. `make test`, deploy; record the heap after boot and the `.mpy` size in `firmware.md`.
 2. Smoke test with the owner: enter the token on the phone, pick `night`; check `profile`, then `cycle_start` and
    `would` when a trigger is met. A remote press while idle gives `manual: AC on, not started by us`, then
    `takeover` and `would set …` once the hold is over. `writes` stays 0.
-3. Seven nights: `night` at bedtime, `day`/`away`/`off` by day as the owner likes, the remote used as usual.
+3. Four nights or more: `night` at bedtime, `day`/`away`/`off` by day as the owner likes, the remote used as usual.
    `python3 tools/shadow_pull.py <pico-ip>` each morning; nothing else needs the Mac.
 4. Review with `--report`: each `would` against the history; remote use always seen as `manual`; the soak (one boot
-   or every reset explained, flat hourly `heap` lines, `writes` 0, no `blocked`). One boot crosses the ticks
-   half-period at about 6.2 days: watch the ages and timers there.
+   or every reset explained, flat hourly `heap` lines, `writes` 0, no `blocked`).
 5. Tuning note in `idea.md`, the soak result in `firmware.md`, M3 marked done here.
+
+The ticks half-period (about 6.2 days on one boot) is not waited for here: the Pico is switched off while nobody is
+home, so a boot rarely gets that far, and the unit, simulator and month tests cross the wrap. One boot past it on
+the board is left to M7's 14-day soak.
 
 M5 keeps the rest of the control API (`/api/action`, `/api/ac/test`) and the full Status tab.
 
@@ -183,7 +186,7 @@ connection checked in headless Chrome at 390 px against `make dev DEV_LIVE=1` (e
 disabled in the others, the dialog, an `ignored` event, a good and a wrong address); `tools/build_web.py`: 15.5 KB
 gzipped of the 60 KB budget; the supervised runner uses `/api/action`.
 
-Left, after M3's week is reviewed, in the same Pico session as M6 and M4's Pico half: deploy; heap while serving the
+Left, after M3's run is reviewed, in the same Pico session as M6 and M4's Pico half: deploy; heap while serving the
 gzipped page; the phone checklist in shadow mode (every button → its event, no token → 401, Test connection with the
 real and a wrong address); then M4's P1–P4 driven by the buttons; merge.
 
@@ -200,7 +203,7 @@ real and a wrong address); then M4's P1–P4 driven by the buttons; merge.
 | Risks | Editor size and complexity (keep one form component per level). |
 | Needs | host + simulator; Pico for acceptance. |
 
-M6 is built on the host first, on the branch `m6-editor`, while M3's week runs on the Pico (deploying reboots it).
+M6 is built on the host first, on the branch `m6-editor`, while M3's run is on the Pico (deploying reboots it).
 Done so far (2026-10-18): a table test with one accepted and one rejected change per row of idea.md's "Validation"
 table; the app's save path (`pending`, applied by the next tick; `config_saved` events; shadow mode keeps the
 owner's `dry_run` in the file); the routes (idea.md, "HTTP API"); power cuts injected at each point of
@@ -208,7 +211,7 @@ owner's `dry_run` in the file); the routes (idea.md, "HTTP API"); power cuts inj
 checked in headless Chrome at phone width (each kind of error marks its field or block, save, revert, restore
 defaults, rename, copy a rule). Page size: about 39 KB before gzip.
 
-Left, after M3's week is reviewed: deploy; heap during a 16 KB PUT and the new sizes in `firmware.md`; the phone
+Left, after M3's run is reviewed: deploy; heap during a 16 KB PUT and the new sizes in `firmware.md`; the phone
 checklist; `tests/device/save_check.py` with about 5 USB pulls mid-save; then merge to `main`.
 
 ## M7: v1.0
