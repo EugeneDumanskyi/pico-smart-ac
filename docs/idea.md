@@ -191,7 +191,9 @@ cycle without its cooldown (`IDLE`, then the new profile's rules); a switch duri
 
 Two JSON files on the Pico's flash (each at most 16 KB). Both are written atomically (write `*.tmp`, then rename) and the
 previous version is kept as `*.bak`. Built-in defaults are compiled into the firmware, so a missing or
-broken file falls back to them (and the web page shows a warning).
+broken file falls back to them. A file that is missing, or that can't be read as JSON (nor its `.bak`), counts as
+missing: defaults and no warning, as on a first boot. A document that fails validation gives the defaults and a
+warning on the page.
 
 ### `profiles.json`
 
@@ -311,8 +313,17 @@ The Pico sends ages and durations in seconds; the page turns them into clock tim
 - Duplicate a profile, rename, delete (not the active one); copy a rule from another profile.
 
 **History**
-- 24 h chart: temp and humidity lines, AC mode as a colored band underneath, cycle starts marked.
-- Event list: cycle start/end, phase changes, manual override detected, takeover, errors, config saved, reboots.
+- A 3 h / 12 h / 24 h toggle over stacked panels on one time axis (SVG, no library; labels on the phone's clock):
+  - temperature: the room solid, outdoor dashed and dim;
+  - humidity;
+  - the AC mode as a band: cool, dry, fan, other; empty while off, hatched while unreachable.
+- `▲` under the band for each cycle start of this boot, and a line where this boot's data begins: the chart holds
+  this boot only (RAM, lost on reboot). Gaps up to `poll_s` long are bridged; longer ones stay gaps.
+- Tap or drag: a cursor with that minute's time, temperature, humidity and mode, kept across the 60 s refresh.
+- Event list from the flash log's tail (`/api/log?tail=300`), newest first, without the hourly `heap` lines: cycle
+  start/end, phases, `would`, profile switches, pause and resume, manual override, takeover, unreachable, failed or
+  blocked writes, config saved, reboots. This boot's events show clock times; an earlier boot's are grouped under
+  "boot N" with their uptime (`+h:mm`), as its clock time is unknown (ADR 0004).
 
 **Settings**
 - Everything in `settings.json`; AC IP with a "test connection" button (tests the address typed, saved or not).
@@ -333,7 +344,7 @@ Large responses (`/api/history`, the UI files) are streamed in chunks. Times are
 | `GET /api/state` | | current state (below) |
 | `GET /api/history` | `?minutes=1440` | `{"step_s": 60, "last_age_s": 12, "temp": [...], "hum": [...], "out": [...], "mode": [...], "power": [...]}`, oldest first, null for gaps |
 | `GET /api/events` | `?limit=100` | `[{"age_s": 120, "boot": 7, "kind": "cycle_start", "msg": "...", "temp": 28.5, "hum": 81}]` newest first, this boot's RAM ring; `temp` and `hum` are the reading the event was decided on (null if none) |
-| `GET /api/log` | | the flash event log as NDJSON, oldest first, earlier boots included: `{"boot": 7, "up_s": 5400, "kind": "would", "msg": "...", "temp": 28.5, "hum": 81}` per line (no `age_s`; lines from before M3 have no `temp`/`hum`) |
+| `GET /api/log` | `?tail=300` (1–500; without it, or with a value that isn't a number, the whole log) | the flash event log as NDJSON, oldest first, earlier boots included: `{"boot": 7, "up_s": 5400, "kind": "would", "msg": "...", "temp": 28.5, "hum": 81}` per line (no `age_s`; lines from before M3 have no `temp`/`hum`). `tail`: only the last lines, found by a backward scan in constant memory |
 | `GET /api/profiles` | | `profiles.json` as the next tick runs it (a saved one before that tick applies it), `active` the controller's |
 | `PUT /api/profiles` | whole document | 200 `{"ok": true, "warnings": [...]}` or 400 `{"ok": false, "errors": [...]}`; saved at once, applied by the next tick |
 | `POST /api/profiles/validate` | whole document | same as PUT, but does not save |
@@ -369,6 +380,7 @@ Config documents (`/api/profiles`, `/api/settings`):
   "room": {"temp": 28, "hum": 81}, "outdoor_temp": 31.5,
   "ac": {"reachable": true, "power": true, "mode": "dry", "target_c": null, "fan": "auto"},
   "dry_run": false,
+  "poll_s": 60,
   "shadow": false,
   "profiles": [{"name": "away", "label": "Away", "rules": ["damp"]},
                {"name": "day", "label": "Day", "rules": ["too_hot", "humid"]},
@@ -376,9 +388,11 @@ Config documents (`/api/profiles`, `/api/settings`):
   "last_error": null,
   "config_warning": null,
   "device": {"uptime_s": 86400, "boot": 7, "heap_free": 150000, "heap_max_block": 90000, "rssi": -60,
-             "wifi_reconnects": 0, "reset_cause": "watchdog"}
+             "wifi_reconnects": 0, "reset_cause": "watchdog", "log_errors": 0}
 }
 ```
+`device.log_errors` counts the event lines the flash refused (full) since boot; the board runs on without them. A boot
+counter it can't save shows as the config warning `boot: flash write failed, counters not saved`.
 
 ### History storage
 - Ring buffer in RAM: 1440 one-minute samples × 5 values ≈ 10 KB. Lost on reboot (acceptable).

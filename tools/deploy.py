@@ -177,7 +177,7 @@ def announce(port):
     if ip:
         print("the page: http://%s/" % ip)
     else:
-        print("no address from the serial port; find the Pico in the router's DHCP client list (README, \"Setup\")")
+        print("no address from the serial port; find the Pico in the router's DHCP client list (docs/install.md)")
 
 
 def build():

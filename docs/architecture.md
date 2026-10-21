@@ -43,6 +43,7 @@ the plan is in [roadmap.md](roadmap.md). Decisions: [decisions/](decisions/).
 | `sim/supervised.py` | sim | `make supervised` (M4): the app writing to the real AC (`DAIKIN_IP`) or the fake one (`SIM=1`), every write approved at the terminal and checked against a fresh read; a scaled controller minute; the API (the Status tab's buttons, `/api/action`) plus `/run/fault` (reads fail) and `/run/sim`; `session.log` with the UTC window ([m4-checklist.md](m4-checklist.md)) |
 | `web/index.html` | assets | the page: tabs (hash routing), Status, shared helpers (`api()` with the token) |
 | `web/editor.js` | assets | Profiles and Settings tabs: one render function per level, inputs tagged with the server's error paths |
+| `web/history.js` | assets | History tab: `/api/history` as SVG panels (no library) on one time axis, and the flash log's tail (`/api/log?tail=`) as the event list |
 
 Logging: user-facing **events** (ring in RAM, cycle summaries and config saves appended to flash),
 **debug log** to USB serial with a level setting, **crash log** (last exception + reset cause, one small file).
@@ -132,7 +133,9 @@ The repo holds code and templates only. Every personal value lives on the owner'
   `secrets.py` and the page (`tools/build_web.py`: each file plus a deterministic `gzip -9` copy, failing over the
   60 KB gzipped budget, which CI checks too); stale files in its own directories (`/smartac`, `/lib`, `/www`) are removed. It refuses to
   run without `secrets.py` and never writes or removes the app's files on the Pico. `deploy.py --backup` copies them
-  into `local/`.
+  into `local/`. After starting the app it waits up to 30 s on the USB serial for `smartac: wifi up <ip>`
+  (`board/pico.py` prints it whenever the link comes up) and prints the page's address; without it, the router's
+  DHCP list has the Pico.
 - Missing `secrets.py` on the Pico: no Wi-Fi, a fixed LED error pattern and a message on USB serial.
 - The LED is dark while all is well: steady on means the AC isn't answering with Wi-Fi up, a fast blink means
   Wi-Fi is down or `secrets.py` is missing (`shell/net.py`, `main.py`).
@@ -185,7 +188,8 @@ src/                     copied to the Pico root (as .mpy, except main.py)
   smartac/shell/         async adapters
   smartac/board/         hardware interface + implementations
   lib/microdot/          vendored, pinned (docs/firmware.md)
-web/                     UI sources: index.html, editor.js; deployed to :www/ as they are until the web build exists
+web/                     UI sources: index.html, editor.js, history.js; tools/build_web.py adds a .gz copy of each,
+                         deployed to :www/
 sim/                     fake Daikin + room model (MicroPython, Unix port): clock, room, device, server, run.py;
                          scenario.py + harness.py (the month run); dev.py (make dev, for the page);
                          supervised.py (make supervised, M4 on the real AC)
@@ -195,7 +199,9 @@ tests/unit/              core tests, unittest style
 tests/golden/            JSON fixtures: config + sensor trace → expected commands
 tests/integration/       full app against the simulator
 tests/device/            scripts run on the Pico with mpremote
-tools/                   daikin_status.py, daikin_check.py, deploy.py, soak_log.py, shadow_pull.py (build_web.py later)
+tools/                   deploy.py, build_web.py, build_micropython.sh, check_spdx.py (Mac and CI);
+                         daikin_status.py, daikin_log.py, soak_log.py, shadow_pull.py (read-only, from the Mac);
+                         daikin_check.py, pico_log.py (on the Pico, early spikes)
 build/                   deploy.py's .mpy output (gitignored)
 local/                   owner's backups of settings/profiles, shadow pulls, M4 sessions (gitignored)
 docs/

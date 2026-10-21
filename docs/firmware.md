@@ -89,7 +89,7 @@ M1 app on the device, 2026-10-17, deployed with `tools/deploy.py` (all `.mpy`, 2
 1. Download the UF2 above and check it: `shasum -a 256 RPI_PICO2_W-20260824-v1.29.0.uf2`.
 2. Hold BOOTSEL while plugging in USB; the Pico appears as a drive (`RP2350`).
 3. Copy the UF2 onto the drive. The Pico reboots into MicroPython.
-4. Check: `mpremote exec "import sys; print(sys.implementation)"` should report v1.29.0.
+4. Check: `pipx run mpremote==1.29.0 exec "import sys; print(sys.implementation)"` should report v1.29.0.
 
 Flashing MicroPython leaves the littlefs file system (our code and config) in place.
 
