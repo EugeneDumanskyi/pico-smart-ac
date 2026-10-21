@@ -7,12 +7,15 @@
 #   python3 tools/deploy.py --maint    only enter maintenance mode
 #   python3 tools/deploy.py --run      only leave maintenance mode (start the app)
 #   python3 tools/deploy.py --backup   copy the Pico's JSON, log and crash files into local/backup-<time>/
+# Starting the app (a deploy, --run) waits up to WAIT_S for its "smartac: wifi up <ip>" line on the USB serial and
+# prints the page's address; --no-wait skips that.
 # Maintenance mode is the file /maint: main.py returns to the REPL before the watchdog starts, so the board stays
 # quiet while files are copied. The app's own files (*.json, events*.log, crash.txt) are never written or removed.
 # Needs mpy-cross from tools/build_micropython.sh (MPY_DIR), and mpremote (MPREMOTE, default pipx run, pinned).
 import argparse
 import json
 import os
+import select
 import shlex
 import shutil
 import subprocess
@@ -35,6 +38,10 @@ APP_FILES = (".json", ".json.bak", ".json.tmp", ".log", "crash.txt")  # the app'
 
 # The reset's reason for the next boot (board/pico.py). MicroPython doesn't close a file when its last reference
 # goes, so every file is closed explicitly before machine.reset().
+WAIT_S = 30
+WIFI_UP = b"smartac: wifi up "
+PICO_VID = " 2e8a:"  # Raspberry Pi, in mpremote's port list
+
 REASON = "f=open('/reset_reason.txt','w')\nf.write('deploy')\nf.close()\nimport machine\nmachine.reset()"
 ENTER_MAINT = "open('/maint','w').close()\n" + REASON
 LEAVE_MAINT = "import os\ntry:\n os.remove('/maint')\nexcept OSError:\n pass\n" + REASON
@@ -61,6 +68,7 @@ print('FILES' + json.dumps(out))
 
 class Pico:
     def __init__(self, port):
+        self.port = port
         self.prefix = MPREMOTE + (["connect", port] if port else [])
 
     def run(self, *args, check=True, capture=False):
@@ -106,6 +114,72 @@ class Pico:
         sys.exit("could not list the Pico's files")
 
 
+def serial_port(port):
+    # -> the serial device to read: --port if it is a path, else the first Raspberry Pi board mpremote lists (what
+    # its auto-detect connects to), or None.
+    if port:
+        return port if port.startswith("/") else None
+    r = subprocess.run(MPREMOTE + ["connect", "list"], capture_output=True, text=True)
+    for line in r.stdout.splitlines():
+        if PICO_VID in line:
+            return line.split()[0]
+    return None
+
+
+def wait_for_ip(port, seconds=WAIT_S):
+    # -> the address in the app's "wifi up" line, or None after `seconds`. The board has just reset, so the port
+    # comes and goes while USB starts again: it is opened again until it stays. Lines before the open are lost
+    # (MicroPython drops serial output with no host attached), but the line comes from the net task, 5 s in or later.
+    import termios
+    import tty
+
+    deadline = time.monotonic() + seconds
+    fd, buf = None, b""
+    try:
+        while time.monotonic() < deadline:
+            if fd is None:
+                try:
+                    fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+                    tty.setraw(fd)
+                except (OSError, termios.error):
+                    if fd is not None:
+                        os.close(fd)
+                    fd = None
+                    time.sleep(0.5)
+                    continue
+            if not select.select([fd], [], [], 0.5)[0]:
+                continue
+            try:
+                data = os.read(fd, 1024)
+            except OSError:
+                data = b""
+            if not data:  # the board went away
+                os.close(fd)
+                fd = None
+                continue
+            buf = (buf + data)[-4096:]
+            i = buf.find(WIFI_UP)
+            if i >= 0 and b"\n" in buf[i:]:
+                return buf[i + len(WIFI_UP) : buf.index(b"\n", i)].decode(errors="replace").strip()
+    finally:
+        if fd is not None:
+            os.close(fd)
+    return None
+
+
+def announce(port):
+    # After the app started: where to open the page.
+    dev = serial_port(port)
+    ip = None
+    if dev is not None:
+        print("waiting up to %d s for the Pico's address on %s" % (WAIT_S, dev))
+        ip = wait_for_ip(dev)
+    if ip:
+        print("the page: http://%s/" % ip)
+    else:
+        print("no address from the serial port; find the Pico in the router's DHCP client list (README, \"Setup\")")
+
+
 def build():
     if not MPY_CROSS.exists():
         sys.exit("%s not found; run make micropython" % MPY_CROSS)
@@ -124,7 +198,7 @@ def build():
     print("built %d modules into %s" % (count, BUILD.relative_to(ROOT)))
 
 
-def deploy(pico, stay):
+def deploy(pico, stay, wait):
     secrets = ROOT / "secrets.py"
     if not secrets.exists():
         sys.exit("secrets.py missing: copy secrets.example.py and fill it in first")
@@ -146,6 +220,8 @@ def deploy(pico, stay):
     else:
         print("starting the app")
         pico.leave_maint()
+        if wait:
+            announce(pico.port)
 
 
 def backup(pico):
@@ -168,6 +244,7 @@ def main():
     group.add_argument("--maint", action="store_true", help="only enter maintenance mode")
     group.add_argument("--run", action="store_true", help="only leave maintenance mode")
     group.add_argument("--backup", action="store_true", help="copy the app's files into local/")
+    ap.add_argument("--no-wait", action="store_true", help="don't wait for the Pico's address after starting the app")
     args = ap.parse_args()
     pico = Pico(args.port)
     if args.build:
@@ -178,10 +255,12 @@ def main():
     elif args.run:
         pico.leave_maint()
         print("app started")
+        if not args.no_wait:
+            announce(args.port)
     elif args.backup:
         backup(pico)
     else:
-        deploy(pico, args.stay)
+        deploy(pico, args.stay, not args.no_wait)
 
 
 if __name__ == "__main__":

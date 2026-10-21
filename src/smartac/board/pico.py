@@ -2,7 +2,8 @@
 # Board for the Pico 2 W (docs/firmware.md, "Tested on the device").
 # - machine.reset() reports WDT_RESET on the RP2350, like a real watchdog reset. So reset(reason) first writes
 #   reset_reason.txt; the next boot takes its cause from that file and removes it.
-# - Wi-Fi power saving is switched off (PM_NONE) on every connect.
+# - Wi-Fi power saving is switched off (PM_NONE) on every connect. When the link comes up, "smartac: wifi up <ip>"
+#   goes to the USB serial, where tools/deploy.py waits for it.
 # - The largest free block has no API: it comes from micropython.mem_info()'s "max free sz" (16-byte blocks),
 #   copied through os.dupterm. About 11 ms; the text also goes to the USB serial.
 import gc
@@ -63,6 +64,7 @@ class PicoBoard(Board):
         self.timer = None
         self.pattern = None
         self.wlan = network.WLAN(network.STA_IF)
+        self._was_up = False
         self._capture = _Capture()
 
     def ticks_ms(self):
@@ -103,7 +105,11 @@ class PicoBoard(Board):
         return self._cause
 
     def link_up(self):
-        return self.wlan.isconnected()
+        up = self.wlan.isconnected()
+        if up and not self._was_up:
+            print("smartac: wifi up %s" % self.wlan.ifconfig()[0])
+        self._was_up = up
+        return up
 
     def wifi_connect(self):
         if self.secrets is None:
