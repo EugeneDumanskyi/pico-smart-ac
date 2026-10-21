@@ -4,7 +4,7 @@
      the profile dropdown sends POST /api/active, the buttons POST /api/action. A button is enabled only in the states
      the controller accepts it in; one that still doesn't apply shows its `ignored` event. The Profiles and Settings
      forms are in editor.js, which uses the helpers below ($, rows, store, api) and the "state" event and gives back
-     window.ruleSummary. No build step yet; deploy copies both files to :www. -->
+     window.ruleSummary. tools/build_web.py gzips both files for the Pico. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">

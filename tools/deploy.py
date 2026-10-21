@@ -21,6 +21,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import build_web
+
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
 BUILD = ROOT / "build"
@@ -28,7 +30,6 @@ MPY_DIR = Path(os.environ.get("MPY_DIR", "~/.cache/smartac/micropython-v1.29.0")
 MPY_CROSS = MPY_DIR / "mpy-cross" / "build" / "mpy-cross"
 MPREMOTE = shlex.split(os.environ.get("MPREMOTE", "pipx run mpremote==1.29.0"))
 TREES = ("smartac", "lib")  # under src/, compiled to .mpy
-WEB_FILES = ("index.html", "editor.js")  # served by shell/api.py's routes, nothing else
 MANAGED = ("/smartac", "/lib", "/www")  # board dirs this tool owns; stale files in them are removed
 APP_FILES = (".json", ".json.bak", ".json.tmp", ".log", "crash.txt")  # the app's; only --backup reads them
 
@@ -118,9 +119,7 @@ def build():
             # Run from src/ so tracebacks name smartac/shell/app.py, not a path on this Mac.
             subprocess.run([str(MPY_CROSS), "-o", str(out), str(rel)], cwd=SRC, check=True)
             count += 1
-    (BUILD / "www").mkdir()
-    for name in WEB_FILES:
-        shutil.copy(ROOT / "web" / name, BUILD / "www" / name)
+    build_web.build(BUILD / "www")
     shutil.copy(SRC / "main.py", BUILD / "main.py")
     print("built %d modules into %s" % (count, BUILD.relative_to(ROOT)))
 

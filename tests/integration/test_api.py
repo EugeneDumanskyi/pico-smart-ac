@@ -43,7 +43,7 @@ def put(path, body, token=None):
 
 
 def exchange(*requests, timeout_ms=api.REQUEST_TIMEOUT_MS, shadow=False, token=None, store=None, before=None,
-             after=None):
+             after=None, www=WWW):
     # Start the app's server, send each raw request on its own connection. -> [(status, body) or None].
     # A request may also be `async f(port) -> reply`, for exchanges that need more than one connection.
     # before(app): awaited after the first tick, before any request; after(app): awaited once the replies are in,
@@ -58,7 +58,7 @@ def exchange(*requests, timeout_ms=api.REQUEST_TIMEOUT_MS, shadow=False, token=N
         await app.tick()
         if before is not None:
             await before(app)
-        web = api.make(app, WWW, timeout_ms, token=token)
+        web = api.make(app, www, timeout_ms, token=token)
         task = asyncio.create_task(web.start_server("127.0.0.1", PORT))
         await asyncio.sleep_ms(50)
         try:
@@ -100,6 +100,35 @@ class TestRoutes(unittest.TestCase):
         [(status, body)] = exchange(get("/"))
         self.assertEqual(status, 200)
         self.assertTrue(b"/api/state" in body)
+
+    def test_gzipped_page(self):
+        # A built www (tools/build_web.py) has a .gz copy next to each file; a client without gzip gets the plain one.
+        root = _tmpdir()
+        try:
+            for name, data in (("index.html", b"<p>plain</p>"), ("index.html.gz", b"\x1f\x8bpacked"),
+                               ("editor.js", b"// plain")):
+                with open(root + "/" + name, "wb") as f:
+                    f.write(data)
+
+            def page(path, accept=None):
+                head = "GET %s HTTP/1.1\r\nHost: pico\r\n" % path
+                if accept:
+                    head += "Accept-Encoding: %s\r\n" % accept
+                return lambda port: simhttp.raw(port, (head + "\r\n").encode(), head=True)
+
+            replies = exchange(page("/", "gzip, deflate, br"), page("/"), page("/", "br"), page("/editor.js", "gzip"),
+                               www=root)
+        finally:
+            for name in os.listdir(root):
+                os.remove(root + "/" + name)
+            os.rmdir(root)
+        self.assertEqual([r[:2] for r in replies], [(200, b"\x1f\x8bpacked"), (200, b"<p>plain</p>"),
+                                                    (200, b"<p>plain</p>"), (200, b"// plain")])
+        heads = [r[2].lower() for r in replies]
+        self.assertIn("content-encoding: gzip", heads[0])
+        self.assertIn("content-type: text/html", heads[0])
+        self.assertFalse("content-encoding" in heads[1] or "content-encoding" in heads[3])
+        self.assertIn("vary: accept-encoding", heads[1])
 
     def test_unknown_path_and_method(self):
         replies = exchange(get("/api/nope"), get("/www/index.html"), b"POST /api/state HTTP/1.1\r\n\r\n",

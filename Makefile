@@ -10,7 +10,7 @@ M4_DIR ?= local/m4/$(shell date -u +%Y%m%d-%H%M%SZ)
 MINUTE_S ?= 15
 export MPY_DIR
 
-.PHONY: micropython lint test month dev supervised build deploy
+.PHONY: micropython lint test month dev supervised web build deploy
 
 micropython:
 	tools/build_micropython.sh
@@ -27,6 +27,10 @@ month:
 
 dev:
 	$(MICROPYTHON) sim/dev.py $(DEV_DIR) $(DEV_SPEED)
+
+# The page gzipped into build/www, with its size against the 60 KB budget.
+web:
+	python3 tools/build_web.py
 
 # M4: DAIKIN_IP=<ac-ip> make supervised; SIM=1 for the simulator, M4_DIR=local/m4/<stamp> to restart a session.
 supervised:

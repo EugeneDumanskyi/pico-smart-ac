@@ -6,8 +6,9 @@ import json
 HOST = "127.0.0.1"
 
 
-async def raw(port, data):
+async def raw(port, data, head=False):
     # Send raw bytes, read until the server closes. -> (status, body bytes), or None if it closed with no reply.
+    # head: (status, body, the header block as text) instead.
     reader, writer = await asyncio.open_connection(HOST, port)
     try:
         writer.write(data)
@@ -23,8 +24,9 @@ async def raw(port, data):
         await writer.wait_closed()
     if not reply:
         return None
-    head, _, body = reply.partition(b"\r\n\r\n")
-    return int(head.split(b" ")[1]), body
+    top, _, body = reply.partition(b"\r\n\r\n")
+    status = int(top.split(b" ")[1])
+    return (status, body, top.decode()) if head else (status, body)
 
 
 def post_bytes(body, path="/dsiot/multireq"):

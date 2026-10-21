@@ -4,12 +4,14 @@
 # /api/ac/test. GETs are open on the LAN; a POST or PUT needs X-Token equal to API_TOKEN from
 # secrets.py, and with no token configured every one is refused. Unknown paths -> 404, other methods -> 405.
 # Microdot has no read timeout: a client that stops mid-request would keep its socket and task forever, so each
-# request runs under a deadline. /api/history and /api/log are streamed.
+# request runs under a deadline. /api/history and /api/log are streamed. The page's files go out gzipped
+# (tools/build_web.py) to a client that takes gzip, streamed from flash as they are.
 # Bodies: Microdot reads up to max_body_length itself; a config document (up to 16 KB) is read from the stream only
 # after the token check, one at a time (a parsed 16 KB document takes ~90 KB of heap). Larger than
 # max_content_length -> 413 before any route runs.
 import asyncio
 import json
+import os
 import sys
 
 from microdot import Microdot, Request, Response
@@ -52,6 +54,19 @@ class _Server(Microdot):
             await writer.wait_closed()
         except OSError:
             pass
+
+
+def _asset(req, path):
+    # The .gz copy when the client takes gzip and it exists, else the plain file (make dev serves web/ unbuilt).
+    gz = "gzip" in req.headers.get("Accept-Encoding", "")
+    if gz:
+        try:
+            os.stat(path + ".gz")
+        except OSError:
+            gz = False
+    resp = Response.send_file(path, max_age=0, compressed=gz, file_extension=".gz" if gz else "")
+    resp.headers["Vary"] = "Accept-Encoding"
+    return resp
 
 
 def _token_ok(given, token):
@@ -167,11 +182,11 @@ def make(app, www="/www", timeout_ms=REQUEST_TIMEOUT_MS, token=None):
 
     @web.get("/")
     async def index(req):
-        return Response.send_file(www + "/index.html", max_age=0)
+        return _asset(req, www + "/index.html")
 
     @web.get("/editor.js")
     async def editor(req):
-        return Response.send_file(www + "/editor.js", max_age=0)
+        return _asset(req, www + "/editor.js")
 
     @web.get("/api/state")
     async def state(req):

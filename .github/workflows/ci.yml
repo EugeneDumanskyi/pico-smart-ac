@@ -16,6 +16,7 @@ jobs:
         with:
           persist-credentials: false
       - run: make lint
+      - run: make web
 
   test:
     runs-on: ubuntu-24.04
