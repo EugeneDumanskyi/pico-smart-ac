@@ -190,6 +190,50 @@ class Cases:
         lines = (first + rest).decode().splitlines()
         self.assertEqual([int(x) for x in lines], list(range(21)))
 
+    def tail(self, s, n):
+        chunks = list(s.tail_events(n))
+        self.assertTrue(all(isinstance(c, bytes) and 0 < len(c) <= READ_CHUNK for c in chunks))
+        text = b"".join(chunks).decode()
+        self.assertTrue(text == "" or text.endswith("\n"))
+        return text.splitlines()
+
+    def test_tail(self):
+        s = FileStore(self.root)
+        self.assertEqual(self.tail(s, 5), [])  # no log yet
+        _write(self.root + "/events.log", "")
+        self.assertEqual(self.tail(s, 5), [])
+        for i in range(30):  # 50-byte lines: several 512-byte pieces back
+            s.append_event("%049d" % i)
+        self.assertEqual([int(x) for x in self.tail(s, 1)], [29])
+        self.assertEqual([int(x) for x in self.tail(s, 12)], list(range(18, 30)))
+        self.assertEqual([int(x) for x in self.tail(s, 30)], list(range(30)))
+        self.assertEqual([int(x) for x in self.tail(s, 500)], list(range(30)))  # more than the log holds
+
+    def test_tail_across_rotation(self):
+        s = FileStore(self.root)
+        per_file = EVENT_LOG_BYTES // 100
+        for i in range(per_file + 3):
+            s.append_event("%099d" % i)
+        self.assertEqual([int(x) for x in self.tail(s, 3)], list(range(per_file, per_file + 3)))
+        self.assertEqual([int(x) for x in self.tail(s, 10)], list(range(per_file - 7, per_file + 3)))
+        self.assertEqual([int(x) for x in self.tail(s, 2 * per_file)], list(range(per_file + 3)))
+
+    def test_tail_of_cut_lines(self):
+        # A power cut leaves a last line without its newline: it still counts as a line, and doesn't run into the
+        # next file's first one.
+        _write(self.root + "/events.1.log", "a1\na2\na3-cut")
+        _write(self.root + "/events.log", "b1\nb2-cut")
+        s = FileStore(self.root)
+        self.assertEqual(self.tail(s, 1), ["b2-cut"])
+        self.assertEqual(self.tail(s, 2), ["b1", "b2-cut"])
+        self.assertEqual(self.tail(s, 3), ["a3-cut", "b1", "b2-cut"])
+        self.assertEqual(self.tail(s, 9), ["a1", "a2", "a3-cut", "b1", "b2-cut"])
+        self.assertEqual(b"".join(s.read_events()).decode().splitlines(), ["a1", "a2", "a3-cut", "b1", "b2-cut"])
+        # A cut first line in events.1.log (the file started mid-line) comes back as it is, for from_line to drop.
+        _write(self.root + "/events.1.log", "t-of-a-line\na2\n")
+        self.assertEqual(self.tail(s, 4), ["t-of-a-line", "a2", "b1", "b2-cut"])
+        self.assertEqual(self.tail(s, 3), ["a2", "b1", "b2-cut"])
+
     def test_boot_counter(self):
         s = FileStore(self.root)
         self.assertEqual([s.next_boot(), s.next_boot()], [1, 2])

@@ -4,7 +4,7 @@
 #   load(name) -> parsed document or None, save(name, doc), append_event(line) -> False if the flash refused it,
 #   next_boot(save=True) -> int, load_crash() -> text or None, save_crash(text),
 #   reset_counts(cause, save=True) -> {cause: count},
-#   read_events() -> the event log as text pieces, oldest first (GET /api/log)
+#   read_events() -> the event log as text pieces, oldest first (GET /api/log), tail_events(n) -> its last n lines
 # save() and the counters raise OSError when the flash is full (save=False: the count without saving it).
 # Documents: "profiles", "settings", "state" (the controller snapshot), "boot" (the boot counter),
 # "resets" (resets by cause).
@@ -15,6 +15,7 @@ MAX_EVENT_LINES = 1300  # about what the 2 x 64 KB rotating log holds
 # At least 64 KB kept: about 100 decision lines a day plus 24 hourly heap lines, so over 9 days.
 EVENT_LOG_BYTES = 64 * 1024
 READ_CHUNK = 512
+LOGS = ("events.1.log", "events.log")  # oldest first
 MAX_CRASH = 2048
 
 
@@ -75,6 +76,10 @@ class MemoryStore(_Store):
 
     def read_events(self):
         for line in self.events:
+            yield line + "\n"
+
+    def tail_events(self, n):
+        for line in self.events[-n:]:
             yield line + "\n"
 
     def load_crash(self):
@@ -153,11 +158,57 @@ class FileStore(_Store):
         return True
 
     def read_events(self):
-        # events.1.log, then events.log, in READ_CHUNK pieces. Each piece opens and closes the file, so none is held
-        # open while the HTTP task waits on the socket and the control task appends or rotates. A rotation in
-        # between can drop or repeat lines in this read; the next one has them (tools/shadow_pull.py dedups).
-        for name in ("events.1.log", "events.log"):
-            pos = 0
+        return self._stream(LOGS[0], 0)
+
+    def tail_events(self, n):
+        # The last n lines (n >= 1) as read_events pieces. A backward scan finds where they start, in events.log or,
+        # if that holds fewer, in events.1.log, so any n takes constant memory. A rotation between the scan and the
+        # read starts it in the wrong place: the first line may be cut (from_line drops it).
+        for name in (LOGS[1], LOGS[0]):
+            pos, n = self._line_start(name, n)
+            if pos is not None:
+                return self._stream(name, pos)
+        return self._stream(LOGS[0], 0)  # fewer than n lines in all
+
+    def _line_start(self, name, n):
+        # -> (the offset of the nth line from the end, 0), or (None, n less this file's lines). The file's last byte
+        # ends its last line, newline or not; an empty or missing file has none.
+        path = self.root + name
+        try:
+            size = os.stat(path)[6]
+        except OSError:
+            return None, n
+        end = size - 1
+        while end > 0:
+            begin = max(0, end - READ_CHUNK)
+            try:
+                with open(path, "rb") as f:
+                    f.seek(begin)
+                    data = f.read(end - begin)
+            except OSError:
+                return None, n
+            i = len(data)
+            while True:
+                i = data.rfind(b"\n", 0, i)
+                if i < 0:
+                    break
+                n -= 1
+                if n == 0:
+                    return begin + i + 1, 0
+            end = begin
+        if size:
+            n -= 1  # the first line, which no newline starts
+            if n == 0:
+                return 0, 0
+        return None, n
+
+    def _stream(self, first, pos):
+        # From `first` at pos to the end of events.log, in READ_CHUNK pieces. Each piece opens and closes the file,
+        # so none is held open while the HTTP task waits on the socket and the control task appends or rotates.
+        # A rotation in between can drop or repeat lines in this read; the next one has them (shadow_pull.py
+        # dedups). A file whose last line has no newline (a power cut) gets one, so it doesn't run into the next.
+        for name in LOGS[LOGS.index(first):]:
+            last = b"\n"
             while True:
                 try:
                     with open(self.root + name, "rb") as f:
@@ -168,7 +219,11 @@ class FileStore(_Store):
                 if not data:
                     break
                 pos += len(data)
+                last = data[-1:]
                 yield data
+            if last != b"\n":
+                yield b"\n"
+            pos = 0
 
     def load_crash(self):
         try:

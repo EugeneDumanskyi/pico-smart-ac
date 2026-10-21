@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# HTTP routes (idea.md, "HTTP API"): GET /, /editor.js, /api/state, /api/history, /api/events, /api/log,
+# HTTP routes (idea.md, "HTTP API"): GET /, /editor.js, /api/state, /api/history, /api/events, /api/log[?tail=N],
 # GET/PUT /api/profiles and /api/settings, POST /api/profiles/validate and /reset, POST /api/active, /api/action and
 # /api/ac/test. GETs are open on the LAN; a POST or PUT needs X-Token equal to API_TOKEN from
 # secrets.py, and with no token configured every one is refused. Unknown paths -> 404, other methods -> 405.
@@ -32,6 +32,7 @@ REQUEST_TIMEOUT_MS = 10000
 ACTIONS = (ACT_PAUSE, ACT_RESUME, ACT_RUN, ACT_STOP, ACT_STOP_NOW, ACT_CLEAR_MANUAL)  # set_profile: /api/active
 MAX_DOC_BODY = 17 * 1024  # config.MAX_DOC_BYTES plus room for the page's whitespace
 DRAIN_CHUNK = 512
+MAX_TAIL = 500  # /api/log?tail=
 Request.max_content_length = MAX_DOC_BODY
 Request.max_body_length = 1024
 Request.max_readline = 1024
@@ -85,6 +86,14 @@ def _error(status, msg):
 
 def _int(v):
     return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _tail(v):
+    # ?tail= -> 1..MAX_TAIL, or None (the whole log) for a missing or garbage value.
+    try:
+        return min(max(int(v), 1), MAX_TAIL)
+    except (TypeError, ValueError):
+        return None
 
 
 def _check_action(body, profiles):
@@ -203,9 +212,12 @@ def make(app, www="/www", timeout_ms=REQUEST_TIMEOUT_MS, token=None):
 
     @web.get("/api/log")
     async def log(req):
-        # The flash log as NDJSON, oldest first, earlier boots included (tools/shadow_pull.py).
+        # The flash log as NDJSON, oldest first, earlier boots included (tools/shadow_pull.py). ?tail=N: the last N
+        # lines only (the History tab).
+        tail = _tail(req.args.get("tail"))
+        body = app.store.read_events() if tail is None else app.store.tail_events(tail)
         headers = {"Content-Type": "application/x-ndjson", "Cache-Control": "no-store"}
-        return Response(body=app.store.read_events(), headers=headers)
+        return Response(body=body, headers=headers)
 
     @web.post("/api/active")
     async def active(req):

@@ -360,6 +360,18 @@ class TestLog(unittest.TestCase):
         self.assertEqual([(d["boot"], d["kind"]) for d in lines], [(0, "heap")] * 3 + [(1, t.EV_BOOT)])
 
 
+    def test_tail(self):
+        store = MemoryStore()
+        for n in range(600):
+            store.append_event(json.dumps({"boot": 0, "up_s": n, "kind": "heap", "msg": "m"}))
+        paths = ("/api/log?tail=3", "/api/log?tail=0", "/api/log?tail=9999", "/api/log?tail=x", "/api/log?tail=")
+        replies = exchange(*[get(p) for p in paths], shadow=True, store=store)
+        lines = [[json.loads(line) for line in body.decode().splitlines()] for _, body in replies]
+        self.assertEqual([r[0] for r in replies], [200] * 5)
+        self.assertEqual([d["up_s"] for d in lines[0][:2]] + [lines[0][2]["kind"]], [598, 599, t.EV_BOOT])
+        self.assertEqual([len(x) for x in lines], [3, 1, 500, 601, 601])  # clamped to 1..500, else the whole log
+
+
 def doc_body(doc):
     return json.dumps(doc).encode()
 
