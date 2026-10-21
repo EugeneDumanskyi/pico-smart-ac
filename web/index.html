@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 <!-- The page: tabs Status, Profiles, Settings (hash routing). Status polls /api/state and the last events every 5 s;
-     the profile dropdown sends POST /api/active. The Profiles and Settings forms are in editor.js, which uses the
-     helpers below ($, rows, store, api) and the "state" event. No build step yet; deploy copies both files to :www. -->
+     the profile dropdown sends POST /api/active, the buttons POST /api/action. A button is enabled only in the states
+     the controller accepts it in; one that still doesn't apply shows its `ignored` event. The Profiles and Settings
+     forms are in editor.js, which uses the helpers below ($, rows, store, api) and the "state" event and gives back
+     window.ruleSummary. No build step yet; deploy copies both files to :www. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -30,10 +32,23 @@
   #err { color: var(--bad); min-height: 1.4em; }
   .badge { font-size: .75rem; font-weight: 600; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--dim);
            color: var(--dim); vertical-align: 2px; }
-  .ctl { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
   select, input, button { font: inherit; }
   select, input { padding: 4px 6px; }
   #cycle { margin: 0 0 12px; }
+  .acts { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
+  .acts .row { margin: 0; gap: 6px; }
+  .acts .row > b { font-weight: 600; font-size: .85rem; color: var(--dim); min-width: 4.5em; }
+  .acts button { padding: 6px 12px; min-height: 2.5rem; }
+  .acts select { min-height: 2.5rem; max-width: 100%; }
+  #run-sum { color: var(--dim); font-size: .85rem; margin: 0; }
+  #sent { color: var(--dim); font-size: .9rem; }
+  #sent.bad { color: var(--bad); }
+  .danger { color: var(--bad); }
+  dialog { border: 1px solid var(--line); border-radius: 8px; background: var(--box); color: var(--fg);
+           max-width: 22rem; padding: 16px; }
+  dialog::backdrop { background: rgb(0 0 0 / .4); }
+  dialog .row { justify-content: flex-end; margin-top: 12px; }
+  dialog button { padding: 6px 12px; min-height: 2.5rem; }
   h2 { font-size: .9rem; font-weight: 600; margin: 20px 0 4px; color: var(--dim); }
   #events td:first-child { width: 5.5em; }
   #events small { color: var(--dim); }
@@ -72,24 +87,42 @@
 </head>
 <body>
 <main>
-  <h1>smartac <span id="state"></span> <span id="shadow" class="badge" hidden>shadow</span></h1>
+  <h1>smartac <span id="state"></span> <span id="shadow" class="badge" hidden>shadow</span>
+    <span id="dryrun" class="badge" hidden>dry run</span></h1>
   <nav id="tabs"><a href="#status">Status</a><a href="#profiles">Profiles</a><a href="#settings">Settings</a></nav>
   <section id="status">
     <div class="big">
       <div><small>room</small><span id="temp">–</span></div>
       <div><small>humidity</small><span id="hum">–</span></div>
       <div><small>outdoor</small><span id="out">–</span></div>
-    </div>
-    <div class="ctl">
-      <label>profile <select id="profile" disabled></select></label>
-      <span id="sent"></span>
+      <div><small id="ac-sub">AC</small><span id="ac">–</span></div>
     </div>
     <p id="cycle"></p>
     <p id="err"></p>
+    <div class="acts">
+      <div class="row"><b>profile</b><select id="profile" disabled aria-label="profile"></select></div>
+      <div class="row" id="pause"><b>pause</b>
+        <button data-min="60">1 h</button><button data-min="120">2 h</button><button data-min="480">8 h</button>
+        <button data-min="">until resumed</button><button id="resume">Resume</button></div>
+      <div class="row"><b>run now</b><select id="run-profile" aria-label="profile to run"></select>
+        <select id="run-rule" aria-label="rule to run"></select><button id="run">Run</button></div>
+      <p id="run-sum"></p>
+      <div class="row"><b>stop</b><button id="stop">Stop</button><button id="stop-now" class="danger">Stop now</button>
+        <button id="clear">Clear manual hold</button></div>
+      <span id="sent" aria-live="polite"></span>
+    </div>
     <table id="rows"></table>
     <h2>events</h2>
     <table id="events"></table>
   </section>
+  <dialog id="choice">
+    <p id="choice-q"></p>
+    <p class="hint">Finish: the fan phase dries the coil, then off. Leave running: the AC stays as it is, hands off.</p>
+    <form method="dialog" class="row">
+      <button value="cancel">Cancel</button><button value="leave">Leave running</button>
+      <button value="finish" class="primary" autofocus>Finish</button>
+    </form>
+  </dialog>
   <section id="profiles" hidden></section>
   <section id="settings" hidden>
     <div id="settings-form"></div>
@@ -176,7 +209,7 @@ function cycleText(s) {
 
 function renderProfiles(s) {
   const sel = $("profile");
-  if (s.state === "OBSERVE") { sel.disabled = true; return; }
+  if (s.state === "OBSERVE" || s.booting) { sel.disabled = true; return; }
   const names = ["off", ...s.profiles.map((p) => p.name)];
   const key = names.join(",");
   if (sel.dataset.key !== key) {
@@ -187,19 +220,117 @@ function renderProfiles(s) {
   sel.disabled = false;
 }
 
+// --- controls. last: the last /api/state; events: the last /api/events rows.
+let last = null, events = [];
+const CYCLING = ["RUNNING", "TAKEOVER"];
+
+function choose(question) {
+  // While a phase runs: finish it or leave the AC running? -> "finish", "leave" or null (cancelled).
+  if (!last || !CYCLING.includes(last.state)) return Promise.resolve("finish");
+  const d = $("choice");
+  $("choice-q").textContent = question;
+  d.returnValue = "cancel";
+  d.showModal();
+  return new Promise((done) => d.addEventListener("close", () => {
+    done(d.returnValue === "cancel" || !d.returnValue ? null : d.returnValue);
+  }, { once: true }));
+}
+
+function said(text, bad) {
+  $("sent").textContent = text;
+  $("sent").classList.toggle("bad", !!bad);
+}
+
+async function send(path, body) {
+  // POST, then look again after the tick that applies it: an `ignored` event above the newest event seen before
+  // the send is shown here (found by kind and message; ages tick on, so they only have to be no younger).
+  said("sending…");
+  const top = events[0];
+  try {
+    const r = await api("POST", path, body);
+    if (r.status !== 202) throw new Error((r.data && r.data.error) || "HTTP " + r.status);
+    if (r.data) render(r.data);
+    said("sent");
+  } catch (e) {
+    said("not sent: " + e.message, true);
+    return false;
+  }
+  setTimeout(async () => {
+    await poll();
+    const old = top ? events.findIndex((e) => e.kind === top.kind && e.msg === top.msg && e.age_s >= top.age_s) : -1;
+    const ig = events.slice(0, old < 0 ? events.length : old).find((e) => e.kind === "ignored");
+    said(ig ? "not applied: " + ig.msg : "", !!ig);
+  }, 1500);
+  return true;
+}
+
 async function setProfile(name) {
   const sel = $("profile");
   sel.dataset.busy = "1";
-  $("sent").textContent = "sending…";
-  try {
-    const r = await api("POST", "/api/active", { profile: name, cycle: "finish" });
-    if (r.status !== 202) throw new Error((r.data && r.data.error) || "HTTP " + r.status);
-    $("sent").textContent = "";
-  } catch (e) {
-    $("sent").textContent = "not changed: " + e.message;
-  }
+  const cycle = name === last.profile ? null : await choose("A phase is running. Switch to " + name + " and…");
+  if (cycle) await send("/api/active", { profile: name, cycle });
   delete sel.dataset.busy;
-  poll();
+  if (!cycle) sel.value = last.profile;
+}
+
+async function pause(minutes) {
+  const cycle = await choose("A phase is running. Pause and…");
+  if (cycle) send("/api/action", { action: "pause", minutes, cycle });
+}
+
+const act = (action, extra) => send("/api/action", Object.assign({ action }, extra));
+
+function renderRun(s) {
+  const p = $("run-profile"), r = $("run-rule");
+  const key = s.profiles.map((x) => x.name + ":" + x.rules.join(",")).join(";");
+  if (p.dataset.key !== key) {
+    p.replaceChildren(...s.profiles.map((x) => new Option(x.label, x.name)));
+    p.dataset.key = key;
+    p.value = s.profiles.some((x) => x.name === s.profile) ? s.profile : (s.profiles[0] || {}).name;
+    p.dataset.picked = "";
+    fillRules();
+  } else if (!p.dataset.picked && s.profiles.some((x) => x.name === s.profile) && p.value !== s.profile) {
+    p.value = s.profile;  // follows the active profile until the owner picks one
+    fillRules();
+  }
+}
+
+function fillRules() {
+  const prof = last && last.profiles.find((x) => x.name === $("run-profile").value);
+  $("run-rule").replaceChildren(...(prof ? prof.rules : []).map((n, i) => new Option(n, i)));
+  showSummary();
+}
+
+let docs = null;  // GET /api/profiles, for the summaries; fetched again when the rules change
+async function showSummary() {
+  const out = $("run-sum"), name = $("run-profile").value, i = +$("run-rule").value;
+  out.textContent = "";
+  if (!name || !window.ruleSummary) return;
+  const key = $("run-profile").dataset.key;
+  if (!docs || docs.key !== key) {
+    try {
+      const r = await fetch("/api/profiles", { cache: "no-store" });
+      docs = r.ok ? { key, doc: await r.json() } : null;
+    } catch (e) { docs = null; }
+  }
+  const rule = docs && docs.doc.profiles[name] && docs.doc.profiles[name].rules[i];
+  out.textContent = rule ? window.ruleSummary(rule) : "";
+}
+
+function renderActions(s) {
+  // Enabled only where the controller accepts it; nothing in observe mode, only Pause while booting.
+  const st = s.state, live = st !== "OBSERVE", ready = live && !s.booting, ac = s.ac;
+  const on = (id, ok) => { $(id).disabled = !ok; };
+  if (live) renderRun(s);
+  for (const b of $("pause").querySelectorAll("button[data-min]")) b.disabled = !live || st === "PAUSED";
+  on("resume", ready && (st === "PAUSED" || s.pause_pending));
+  const runnable = ready && (st === "IDLE" || st === "COOLDOWN") && ac.reachable && !ac.power;
+  on("run", runnable && $("run-rule").options.length > 0);
+  on("run-profile", ready);
+  on("run-rule", ready);
+  on("stop", ready && ["RUNNING", "MANUAL", "TAKEOVER"].includes(st));
+  on("stop-now", ready && (CYCLING.includes(st) || (st === "MANUAL" && ac.power === true)));
+  on("clear", ready && st === "MANUAL");
 }
 
 function acText(s) {
@@ -214,19 +345,29 @@ function acText(s) {
 
 function render(s) {
   const d = s.device;
+  last = s;
   $("state").textContent = s.state;
   $("shadow").hidden = !s.shadow;
+  $("dryrun").hidden = s.shadow || !s.dry_run;  // shadow mode always runs dry
   $("cycle").textContent = cycleText(s);
   renderProfiles(s);
+  renderActions(s);
   $("temp").textContent = deg(s.room.temp);
   $("hum").textContent = s.room.hum == null ? "–" : s.room.hum + " %";
   $("out").textContent = deg(s.outdoor_temp);
-  $("err").textContent = s.unreachable_s != null
-    ? "AC not reachable for " + dur(s.unreachable_s) + (s.last_error ? " (" + s.last_error + ")" : "")
-    : (s.config_warning || "");
+  const ac = s.ac;
+  $("ac").textContent = !ac.reachable ? "?" : ac.power ? "on" : "off";
+  $("ac-sub").textContent = !ac.reachable ? "AC"
+    : "AC " + ac.mode + (ac.target_c != null ? " " + ac.target_c + "°" : "") + (ac.fan ? " fan " + ac.fan : "");
+  $("err").textContent = [
+    s.unreachable_s != null
+      ? "AC not reachable for " + dur(s.unreachable_s) + (s.last_error ? " (" + s.last_error + ")" : "") : "",
+    s.last_write_error ? "last write: " + s.last_write_error : "",
+    s.config_warning || "",
+  ].filter(Boolean).join(" · ");
   rows($("rows"), [
     ["AC", acText(s)],
-    ["reads", s.reads + " (" + s.read_errors + " failed), writes " + s.writes],
+    ["reads", s.reads + " (" + s.read_errors + " failed), writes " + s.writes + " (" + s.write_errors + " failed)"],
   ]);
   const resets = Object.entries(d.resets || {}).map(([k, v]) => k + " " + v).join(", ");
   rows($("device"), [
@@ -245,6 +386,7 @@ function render(s) {
 }
 
 function renderEvents(list) {
+  events = list;
   rows($("events"), list.map((e) => {
     const msg = document.createElement("span");
     msg.textContent = e.kind + ": " + e.msg + " ";
@@ -270,6 +412,18 @@ async function poll() {
   timer = setTimeout(poll, 5000);
 }
 $("profile").addEventListener("change", (ev) => setProfile(ev.target.value));
+for (const b of $("pause").querySelectorAll("button[data-min]")) {
+  b.addEventListener("click", () => pause(b.dataset.min ? +b.dataset.min : null));
+}
+$("resume").addEventListener("click", () => act("resume"));
+$("run-profile").addEventListener("change", (ev) => { ev.target.dataset.picked = "1"; fillRules(); });
+$("run-rule").addEventListener("change", showSummary);
+$("run").addEventListener("click", () => act("run", { profile: $("run-profile").value, rule: +$("run-rule").value }));
+$("stop").addEventListener("click", () => act("stop"));
+$("stop-now").addEventListener("click", () => {
+  if (confirm("Switch the AC off now, without the fan phase?")) act("stop_now");
+});
+$("clear").addEventListener("click", () => act("clear_manual"));
 window.addEventListener("hashchange", showTab);
 </script>
 <script src="/editor.js"></script>

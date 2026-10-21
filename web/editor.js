@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Profiles and Settings tabs (idea.md, "Web UI spec"). Loaded after index.html's script and uses its helpers ($, api)
-// and its events: "tab" (a tab was shown) and "state" (a fresh /api/state).
+// and its events: "tab" (a tab was shown) and "state" (a fresh /api/state). window.ruleSummary is for the Run picker.
 // Each tab edits a copy (draft) of the document from GET; Save sends the whole document with PUT. Every input carries
 // data-path, the JSON path the server's errors use (profiles.day.rules[0].phases[1].max_min), so an error marks its
 // field. A path with no input (e.g. ...phases, or a profile) marks the block with that data-block, or the nearest
@@ -383,6 +383,8 @@
     if (r.min_interval_min > 0) s += " At most one start every " + r.min_interval_min + " min.";
     return s;
   }
+
+  window.ruleSummary = summary;
 
   // --- Profiles tab
 
