@@ -9,8 +9,8 @@
 # A write prints the tick's reading and the state, then waits for y at the prompt. On y the AC is read again, and a
 # change since the tick means no write (ADR 0003: decide from a fresh read). Anything else declines it, which the
 # core sees as a rejected write.
-# HTTP on 127.0.0.1:8080 as in dev.py (token "dev"), plus runner-only routes, for curl from a second terminal:
-#   POST /run/action {"action": "run", "profile": "m4", "rule": 0}    any action the core takes (App.action)
+# HTTP on 127.0.0.1:8080 as in dev.py (token "dev"): the Status page's buttons and POST /api/action as on the Pico,
+# each queued action recorded in session.log. Plus runner-only routes, for curl from a second terminal:
 #   POST /run/fault {"read": "unreachable" | "ok"}                    reads fail until "ok"
 #   POST /run/sim {"remote": {"power": true, "mode": "cool", "target_c": 24, "fan": "auto"}} or {"unreachable": min}
 #                                                                     --sim only: a remote press, or the fake AC
@@ -247,6 +247,12 @@ class SupervisedApp(App):
         super().__init__(board, store, ac_ip, ac_port)
         self.events.flash_kinds = FLASH_KINDS
 
+    def action(self, a):
+        ok = super().action(a)
+        if ok:
+            self.session("action %s" % a)
+        return ok
+
     def _set_client(self, settings):
         old = self.client
         super()._set_client(settings)
@@ -266,18 +272,6 @@ def add_routes(web, app, log, device=None):
         except (AttributeError, UnicodeError, ValueError):
             doc = None
         return doc if isinstance(doc, dict) else None
-
-    @web.post("/run/action")
-    async def action(req):
-        if refused(req):
-            return {"error": "token missing or wrong"}, 401
-        doc = body(req)
-        if doc is None or not isinstance(doc.get("action"), str):
-            return {"error": 'body must be {"action": ...}'}, 400
-        if not app.action(doc):
-            return {"error": "busy, try again"}, 503
-        log("action %s" % doc)
-        return app.status(), 202
 
     @web.post("/run/fault")
     async def fault(req):

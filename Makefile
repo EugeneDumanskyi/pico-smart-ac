@@ -25,8 +25,9 @@ test:
 month:
 	$(MICROPYTHON) sim/harness.py --days 30 --seed $(SEED) --quiet
 
+# DEV_LIVE=1: not in shadow mode, the buttons drive real cycles on the fake AC.
 dev:
-	$(MICROPYTHON) sim/dev.py $(DEV_DIR) $(DEV_SPEED)
+	$(MICROPYTHON) sim/dev.py $(DEV_DIR) $(DEV_SPEED) $(if $(DEV_LIVE),--live)
 
 # The page gzipped into build/www, with its size against the 60 KB budget.
 web:

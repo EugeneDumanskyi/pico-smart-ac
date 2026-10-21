@@ -237,15 +237,15 @@ class TestRoutes(unittest.TestCase):
         app, codes, _ = self.exchange(post("/run/fault", {"read": "unreachable"}, kind=FORM))
         self.assertEqual((codes, app.fault), ([200], True))
 
-    def test_action_is_queued(self):
-        run = {"action": "run", "profile": "m4", "rule": 1}
-        app, codes, _ = self.exchange(post("/run/action", run))
-        self.assertEqual((codes, app.queue), ([202], [run]))
+    def test_api_action_is_queued_and_logged(self):
+        run = {"action": "run", "profile": "day", "rule": 1}
+        app, codes, notes = self.exchange(post("/api/action", run))
+        self.assertEqual((codes, app.queue, notes), ([202], [run], ["action %s" % app.queue[0]]))
 
     def test_bad_requests(self):
         app, codes, notes = self.exchange(
-            post("/run/action", {"action": "stop"}, token=None),
-            post("/run/action", {"profile": "m4"}),
+            post("/api/action", {"action": "stop"}, token=None),
+            post("/api/action", {"profile": "m4"}),
             post("/run/fault", {"read": "maybe"}),
             post("/run/fault", {"read": "unreachable"}, token="wrong"),
         )
