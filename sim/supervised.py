@@ -34,8 +34,8 @@ from sim.server import DEFAULT_PORT, serve  # noqa: E402
 from smartac.board.host import HostBoard  # noqa: E402
 from smartac.core import config, controller  # noqa: E402
 from smartac.core import daikin_codec as codec  # noqa: E402
-from smartac.core.events import SHADOW_FLASH_KINDS  # noqa: E402
-from smartac.core.types import EV_IGNORED, EV_PAUSE, EV_RESUME, ACState, Reading, tenths, ticks_since  # noqa: E402
+from smartac.core.events import FLASH_KINDS as APP_FLASH_KINDS  # noqa: E402
+from smartac.core.types import EV_IGNORED, ACState, Reading, tenths, ticks_since  # noqa: E402
 from smartac.shell import api, tasks  # noqa: E402
 from smartac.shell.app import SETTLE_MS, App  # noqa: E402
 from smartac.shell.daikin import DaikinClient  # noqa: E402
@@ -47,7 +47,7 @@ TOKEN = "dev"
 PROFILE = "m4"
 MINUTE_S = 15
 GAP_S = 4 * 60  # the least time between two of our writes, and between a remote press and our takeover
-FLASH_KINDS = SHADOW_FLASH_KINDS + (EV_PAUSE, EV_RESUME, EV_IGNORED)  # every step, for the checklist
+FLASH_KINDS = APP_FLASH_KINDS + (EV_IGNORED,)  # every step, for the checklist
 
 
 def scale_minute(seconds):

@@ -22,8 +22,9 @@ lint:
 test:
 	$(MICROPYTHON) tests/run.py
 
+# The flash log lives in RAM here (MemoryStore): its 1300 small lines would fragment the default 2 MB heap.
 month:
-	$(MICROPYTHON) sim/harness.py --days 30 --seed $(SEED) --quiet
+	$(MICROPYTHON) -X heapsize=8M sim/harness.py --days 30 --seed $(SEED) --quiet
 
 # DEV_LIVE=1: not in shadow mode, the buttons drive real cycles on the fake AC.
 dev:

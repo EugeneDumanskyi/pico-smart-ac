@@ -12,7 +12,7 @@
 #
 # Flash: add() returns the line for events.log for the kinds in flash_kinds; store.py only appends and rotates.
 # A line holds the boot number and uptime, no clock time (the age of an earlier boot's event is unknown).
-# Shadow mode (M3) also keeps the decisions on flash (SHADOW_FLASH_KINDS), for the week's review.
+# The decisions go to flash in every mode, so the History tab and a shadow review see them after a reboot.
 import json
 
 from smartac.core.types import (
@@ -23,8 +23,10 @@ from smartac.core.types import (
     EV_CYCLE_START,
     EV_HARD_CAP,
     EV_MANUAL,
+    EV_PAUSE,
     EV_PHASE,
     EV_PROFILE,
+    EV_RESUME,
     EV_TAKEOVER,
     EV_UNREACHABLE,
     EV_WOULD,
@@ -35,8 +37,13 @@ from smartac.core.types import (
 SIZE = 200
 MAX_MSG = 80  # longer messages are cut, which bounds the ring's RAM
 REBASE_MS = 24 * 60 * 60 * 1000
-FLASH_KINDS = (EV_CYCLE_END, EV_MANUAL, EV_TAKEOVER, EV_WRITE_FAILED, EV_CONFIG_SAVED, EV_BOOT)
-SHADOW_FLASH_KINDS = FLASH_KINDS + (
+FLASH_KINDS = (
+    EV_CYCLE_END,
+    EV_MANUAL,
+    EV_TAKEOVER,
+    EV_WRITE_FAILED,
+    EV_CONFIG_SAVED,
+    EV_BOOT,
     EV_CYCLE_START,
     EV_PHASE,
     EV_WOULD,
@@ -44,6 +51,8 @@ SHADOW_FLASH_KINDS = FLASH_KINDS + (
     EV_PROFILE,
     EV_UNREACHABLE,
     EV_BLOCKED,
+    EV_PAUSE,
+    EV_RESUME,
 )
 
 

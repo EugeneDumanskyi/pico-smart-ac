@@ -3,8 +3,8 @@
 # controller, persist, write at most once, wait SETTLE_MS, read back. Only the control task talks to the AC;
 # action() is the one way in for the HTTP layer. Exceptions propagate: shell/tasks.py logs and resets.
 # Observe mode (M1) builds no controller: a tick reads the AC and records history, so nothing can write.
-# Shadow mode (M3) runs the controller with dry_run forced on, whatever settings.json and state.json say, and keeps
-# its decisions on flash. A write that still comes out is not sent: it becomes a `blocked` event.
+# Shadow mode (M3) runs the controller with dry_run forced on, whatever settings.json and state.json say. A write
+# that still comes out is not sent: it becomes a `blocked` event.
 # A saved config document (save_profiles(), save_settings()) is on flash at once and parked in `pending`; the next
 # tick applies it before it reads, so only the control task touches the controller and the client.
 import asyncio
@@ -12,7 +12,7 @@ import asyncio
 from smartac.core import config
 from smartac.core.config import OFF
 from smartac.core.controller import FINISH, Controller
-from smartac.core.events import FLASH_KINDS, SHADOW_FLASH_KINDS, EventLog, to_line
+from smartac.core.events import EventLog, to_line
 from smartac.core.history import History
 from smartac.core.types import (
     ACT_SET_PROFILE,
@@ -95,7 +95,7 @@ class App:
             self.controller = Controller(profiles, settings, now, snap)
             self.active = profiles.get("active")  # as stored in profiles.json
         self.history = History()
-        self.events = EventLog(self.boot, flash_kinds=SHADOW_FLASH_KINDS if shadow else FLASH_KINDS)
+        self.events = EventLog(self.boot)
         self.queue = []
         self.pending = {}  # name -> a saved document the next tick applies
         self.wake = asyncio.Event()

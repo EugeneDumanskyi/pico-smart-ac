@@ -24,7 +24,7 @@ the plan is in [roadmap.md](roadmap.md). Decisions: [decisions/](decisions/).
 | `core/rules.py` | core | condition evaluation, first-match rule selection, `confirm_reads` counting, `min_interval` |
 | `core/controller.py` | core | state machine: `step(now, reading, actions) → commands`; owns cycle, stopping, cooldown, manual hold, takeover, pause |
 | `core/history.py` | core | 1440 × 1-min ring buffer in preallocated `array`s; streamed JSON export |
-| `core/events.py` | core | event ring (200), each event with the reading it was decided on; marks which events go to flash (more in shadow mode) and owns the `events.log` line format |
+| `core/events.py` | core | event ring (200), each event with the reading it was decided on; marks which events go to flash and owns the `events.log` line format |
 | `shell/daikin.py` | shell | async HTTP POST to `/dsiot/multireq`, hard timeout, one request at a time (a lock: the Settings tab's AC test on the address in use waits for the control task's read or write), IPv4 literal only (no DNS); never raises |
 | `shell/store.py` | shell | one API, two stores: `MemoryStore` (documents kept as JSON text) on the host, `FileStore` on flash (atomic `.tmp` → rename with `.bak`, rotating event log read back in 512-byte pieces, crash log, boot and reset counters) |
 | `shell/net.py` | shell | Wi-Fi supervisor: reconnect with backoff, the unreachable-AC policy, counters; pure timing over the board and the app |
@@ -92,7 +92,7 @@ didn't set → `MANUAL`; while a write is pending, the unchanged previous state 
 |---|---|---|
 | `profiles.json`, `settings.json` (+ `.bak`) | user saves | ~0 |
 | `state.json` (cycle owner, expected AC state, pause, rules inside their interval) | state transitions, an interval running out | ≤ 50 |
-| `events.log` (rotating, 2 × 64 KB; boot counter, uptime and the reading, no timestamps) | cycle end, config save, override, takeover, failed write, reboot; an hourly `heap` line. Shadow mode adds cycle start, phase, would, hard cap, profile, unreachable, blocked | ≤ 75 (shadow ≤ 150) |
+| `events.log` (rotating, 2 × 64 KB; boot counter, uptime and the reading, no timestamps) | cycle start and end, phase, would, hard cap, profile, pause, resume, override, takeover, unreachable, failed or blocked write, config save, reboot; an hourly `heap` line | ≤ 150 |
 | `crash.txt` (the last traceback) | after an uncaught exception | ~0 |
 | `boot.json`, `resets.json` (+ `.bak`) | once per boot: boot counter, resets by cause | a few |
 | `reset_reason.txt` | just before a deliberate reset; read and removed at the next boot | ~0 |

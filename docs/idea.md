@@ -382,9 +382,10 @@ Config documents (`/api/profiles`, `/api/settings`):
 
 ### History storage
 - Ring buffer in RAM: 1440 one-minute samples × 5 values ≈ 10 KB. Lost on reboot (acceptable).
-- Events: last ~200 in RAM; only config saves, cycle summaries, overrides, takeovers, failed writes and reboots are
-  also appended to a small rotating file on flash with the boot number (a few writes per day, so flash wear doesn't
-  matter). In shadow mode (M3) the decisions go there too (cycle start, phases, `would`), for the review.
+- Events: last ~200 in RAM. The decisions (cycle start and end, phases, `would`, hard cap, profile switches,
+  pause and resume, overrides, takeovers, unreachable, failed or blocked writes, config saves, reboots) are also
+  appended to a small rotating file on flash with the boot number, in every mode: ≤ 150 lines a day, so flash wear
+  doesn't matter, and the History tab still has them after a reboot.
 
 ## Later ideas (not in v1)
 

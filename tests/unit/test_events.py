@@ -54,18 +54,11 @@ class TestRing(unittest.TestCase):
 
 class TestFlash(unittest.TestCase):
     def test_kinds(self):
-        flash = (t.EV_CYCLE_END, t.EV_MANUAL, t.EV_TAKEOVER, t.EV_WRITE_FAILED, t.EV_CONFIG_SAVED, t.EV_BOOT)
-        ram = (
-            t.EV_CYCLE_START,
-            t.EV_PHASE,
-            t.EV_HARD_CAP,
-            t.EV_PAUSE,
-            t.EV_RESUME,
-            t.EV_PROFILE,
-            t.EV_UNREACHABLE,
-            t.EV_WOULD,
-            t.EV_IGNORED,
-        )
+        # The decisions go to flash in every mode; ignored actions and low_memory stay in RAM.
+        flash = (t.EV_CYCLE_END, t.EV_MANUAL, t.EV_TAKEOVER, t.EV_WRITE_FAILED, t.EV_CONFIG_SAVED, t.EV_BOOT,
+                 t.EV_CYCLE_START, t.EV_PHASE, t.EV_WOULD, t.EV_HARD_CAP, t.EV_PROFILE, t.EV_UNREACHABLE,
+                 t.EV_BLOCKED, t.EV_PAUSE, t.EV_RESUME)
+        ram = (t.EV_IGNORED, t.EV_LOW_MEMORY)
         log = e.EventLog(boot=1)
         for kind in flash:
             self.assertTrue(e.to_flash(kind), kind)
@@ -74,6 +67,8 @@ class TestFlash(unittest.TestCase):
             self.assertFalse(e.to_flash(kind), kind)
             self.assertIsNone(log.add(at(0), 0, kind, "m"), kind)
         self.assertEqual(len(log.export(at(0), limit=100)), len(flash) + len(ram))
+        wide = e.EventLog(boot=1, flash_kinds=e.FLASH_KINDS + (t.EV_IGNORED,))  # sim/supervised.py's set
+        self.assertIsNotNone(wide.add(at(0), 0, t.EV_IGNORED, "m"))
 
     def test_line_round_trip(self):
         log = e.EventLog(boot=7)
@@ -101,15 +96,6 @@ class TestFlash(unittest.TestCase):
         row = e.from_line('{"boot": 3, "up_s": 9, "kind": "manual", "msg": "AC changed by hand"}')
         self.assertEqual(row, {"age_s": None, "boot": 3, "kind": "manual", "msg": "AC changed by hand", "temp": None,
                                "hum": None})
-
-    def test_shadow_kinds(self):
-        log = e.EventLog(boot=1, flash_kinds=e.SHADOW_FLASH_KINDS)
-        for kind in e.FLASH_KINDS + (t.EV_CYCLE_START, t.EV_PHASE, t.EV_WOULD, t.EV_HARD_CAP, t.EV_PROFILE,
-                                     t.EV_UNREACHABLE, t.EV_BLOCKED):
-            self.assertIsNotNone(log.add(at(0), 0, kind, "m"), kind)
-        for kind in (t.EV_PAUSE, t.EV_RESUME, t.EV_IGNORED, t.EV_LOW_MEMORY):
-            self.assertIsNone(log.add(at(0), 0, kind, "m"), kind)
-        self.assertIsNone(e.EventLog(boot=1).add(at(0), 0, t.EV_WOULD, "m"))  # the default is unchanged
 
     def test_ring_keeps_readings(self):
         log = e.EventLog(boot=2, size=2)

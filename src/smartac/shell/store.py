@@ -12,7 +12,7 @@ import json
 import os
 
 MAX_EVENT_LINES = 1300  # about what the 2 x 64 KB rotating log holds
-# At least 64 KB kept: in shadow mode (M3) about 100 decision lines a day plus 24 hourly heap lines, so over 9 days.
+# At least 64 KB kept: about 100 decision lines a day plus 24 hourly heap lines, so over 9 days.
 EVENT_LOG_BYTES = 64 * 1024
 READ_CHUNK = 512
 MAX_CRASH = 2048

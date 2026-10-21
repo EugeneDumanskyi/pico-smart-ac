@@ -151,7 +151,8 @@ class TestStore(unittest.TestCase):
         self.assertEqual(app.controller.state, t.COOLDOWN)
         self.assertFalse(w.device.ac().power)
         lines = [json.loads(line) for line in w.store.events]
-        self.assertEqual([(e["boot"], e["kind"]) for e in lines], [(1, "boot"), (2, "boot"), (2, "cycle_end")])
+        self.assertEqual([(e["boot"], e["kind"]) for e in lines],
+                         [(1, "boot"), (1, "cycle_start"), (2, "boot"), (2, "phase"), (2, "cycle_end")])
 
     def test_profile_switch_updates_the_stored_active(self):
         w = World()
