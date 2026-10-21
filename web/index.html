@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
-<!-- The page: tabs Status, Profiles, Settings (hash routing). Status polls /api/state and the last events every 5 s;
+<!-- The page: tabs Status, History, Profiles, Settings (hash routing). Status polls /api/state and the last events every 5 s;
      the profile dropdown sends POST /api/active, the buttons POST /api/action. A button is enabled only in the states
      the controller accepts it in; one that still doesn't apply shows its `ignored` event. The Profiles and Settings
      forms are in editor.js, which uses the helpers below ($, rows, store, api) and the "state" event and gives back
-     window.ruleSummary. tools/build_web.py gzips both files for the Pico. -->
+     window.ruleSummary. The History tab is history.js, on the same helpers. tools/build_web.py gzips the files for
+     the Pico. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -12,10 +13,12 @@
 <title>smartac</title>
 <style>
   :root { color-scheme: light dark; --fg: #1b1b1b; --bg: #fafafa; --dim: #6b6b6b; --line: #ddd; --bad: #b3261e;
-          --warn: #8a5a00; --box: #fff; --accent: #2b5fb3; }
+          --warn: #8a5a00; --box: #fff; --accent: #2b5fb3;
+          --c-cool: #2a78d6; --c-dry: #1baf7a; --c-fan: #eb6834; --c-other: #a8a7a0; }
   @media (prefers-color-scheme: dark) {
     :root { --fg: #e8e8e8; --bg: #161616; --dim: #9a9a9a; --line: #333; --bad: #f2867e; --warn: #e0b04f;
-            --box: #1f1f1f; --accent: #8fb4f0; }
+            --box: #1f1f1f; --accent: #8fb4f0; --c-cool: #3987e5; --c-dry: #199e70; --c-fan: #d95926;
+            --c-other: #6b6b6b; }
   }
   body { margin: 0; padding: 16px; font: 16px/1.4 system-ui, sans-serif; color: var(--fg); background: var(--bg); }
   main { max-width: 34rem; margin: 0 auto; }
@@ -83,13 +86,35 @@
   .primary { font-weight: 600; }
   .lock { color: var(--dim); font-size: .8rem; }
   .hint { color: var(--dim); font-size: .85rem; margin: 4px 0 8px; }
+  /* history (history.js) */
+  #history.busy #h-chart { opacity: .5; }
+  #h-win button { padding: 4px 12px; min-height: 2.5rem; }
+  #h-win button.on { font-weight: 600; outline: 2px solid var(--accent); }
+  #h-read { font-variant-numeric: tabular-nums; min-height: 1.2em; }
+  #h-chart svg { display: block; width: 100%; height: auto; touch-action: pan-y; user-select: none; }
+  #h-chart path { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  #h-chart .ln { stroke: var(--fg); }
+  #h-chart .out { stroke: var(--dim); stroke-dasharray: 4 3; stroke-width: 1.5; }
+  #h-chart .grid path { stroke: var(--line); stroke-width: 1; }
+  #h-chart .boot { stroke: var(--dim); stroke-width: 1; }
+  #h-chart .cur { stroke: var(--accent); stroke-width: 1; }
+  #h-chart path.mark { fill: var(--fg); stroke: none; }
+  #h-chart text { fill: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .legend { display: flex; flex-wrap: wrap; gap: 2px 12px; color: var(--dim); font-size: .8rem; margin: 6px 0; }
+  .legend i { display: inline-block; width: 14px; height: 10px; margin-right: 4px; vertical-align: -1px; }
+  .legend i.ln { height: 0; border-top: 2px solid var(--fg); vertical-align: 3px; }
+  .legend i.out { height: 0; border-top: 2px dashed var(--dim); vertical-align: 3px; }
+  .legend i.u { background: repeating-linear-gradient(45deg, var(--dim) 0 1px, transparent 1px 4px); }
+  #h-events td:first-child { width: 5.5em; }
+  #h-events small { color: var(--dim); }
 </style>
 </head>
 <body>
 <main>
   <h1>smartac <span id="state"></span> <span id="shadow" class="badge" hidden>shadow</span>
     <span id="dryrun" class="badge" hidden>dry run</span></h1>
-  <nav id="tabs"><a href="#status">Status</a><a href="#profiles">Profiles</a><a href="#settings">Settings</a></nav>
+  <nav id="tabs"><a href="#status">Status</a><a href="#history">History</a><a href="#profiles">Profiles</a>
+    <a href="#settings">Settings</a></nav>
   <section id="status">
     <div class="big">
       <div><small>room</small><span id="temp">–</span></div>
@@ -123,6 +148,21 @@
       <button value="finish" class="primary" autofocus>Finish</button>
     </form>
   </dialog>
+  <section id="history" hidden>
+    <div class="row" id="h-win"><button data-min="180">3 h</button><button data-min="720">12 h</button>
+      <button data-min="1440" class="on">24 h</button></div>
+    <p id="h-read" class="hint"></p>
+    <div id="h-chart"></div>
+    <p class="legend"><span><i class="ln"></i>room</span><span><i class="out"></i>outdoor</span>
+      <span><i style="background:var(--c-cool)"></i>cool</span><span><i style="background:var(--c-dry)"></i>dry</span>
+      <span><i style="background:var(--c-fan)"></i>fan</span><span><i style="background:var(--c-other)"></i>other</span>
+      <span><i class="u"></i>unreachable</span><span>▲ cycle start</span></p>
+    <p id="h-err" class="danger"></p>
+    <p class="hint">Since this boot only: the Pico keeps no history across a reboot. Tap or drag the chart to read a
+      minute.</p>
+    <h2>events</h2>
+    <table id="h-events"></table>
+  </section>
   <section id="profiles" hidden></section>
   <section id="settings" hidden>
     <div id="settings-form"></div>
@@ -143,7 +183,7 @@ const kb = (b) => (b == null ? "–" : Math.round(b / 1024) + " KB");
 const mins = (s) => (s == null ? "–" : Math.ceil(s / 60) + " min");
 const clock = (age) => new Date(Date.now() - age * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const TOKEN_KEY = "smartac.token";
-const TABS = ["status", "profiles", "settings"];
+const TABS = ["status", "history", "profiles", "settings"];
 
 function store(get, value) {
   // localStorage may be missing or blocked (private mode): then the token is asked for each time.
@@ -429,6 +469,7 @@ $("clear").addEventListener("click", () => act("clear_manual"));
 window.addEventListener("hashchange", showTab);
 </script>
 <script src="/editor.js"></script>
+<script src="/history.js"></script>
 <script>
 showTab();
 poll();

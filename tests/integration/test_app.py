@@ -240,7 +240,7 @@ class TestObserve(unittest.TestCase):
         app = w.app(observe=True)
         w.run(app, 1000)
         s = app.status()
-        self.assertEqual((s["state"], s["profile"], s["dry_run"]), (t.OBSERVE, None, False))
+        self.assertEqual((s["state"], s["profile"], s["dry_run"], s["poll_s"]), (t.OBSERVE, None, False, 60))
         self.assertEqual((s["shadow"], s["profiles"]), (False, []))
         self.assertEqual(s["room"], {"temp": 29.0, "hum": 80})
         self.assertEqual(s["ac"]["reachable"], True)

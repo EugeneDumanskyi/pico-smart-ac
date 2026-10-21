@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-WEB_FILES = ("index.html", "editor.js")  # served by shell/api.py's routes, nothing else
+WEB_FILES = ("index.html", "editor.js", "history.js")  # served by shell/api.py's routes, nothing else
 BUDGET = 60 * 1024
 
 

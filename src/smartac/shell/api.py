@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# HTTP routes (idea.md, "HTTP API"): GET /, /editor.js, /api/state, /api/history, /api/events, /api/log[?tail=N],
-# GET/PUT /api/profiles and /api/settings, POST /api/profiles/validate and /reset, POST /api/active, /api/action and
-# /api/ac/test. GETs are open on the LAN; a POST or PUT needs X-Token equal to API_TOKEN from
+# HTTP routes (idea.md, "HTTP API"): GET /, /editor.js, /history.js, /api/state, /api/history, /api/events,
+# /api/log[?tail=N], GET/PUT /api/profiles and /api/settings, POST /api/profiles/validate and /reset, POST /api/active,
+# /api/action and /api/ac/test. GETs are open on the LAN; a POST or PUT needs X-Token equal to API_TOKEN from
 # secrets.py, and with no token configured every one is refused. Unknown paths -> 404, other methods -> 405.
 # Microdot has no read timeout: a client that stops mid-request would keep its socket and task forever, so each
 # request runs under a deadline. /api/history and /api/log are streamed. The page's files go out gzipped
@@ -196,6 +196,10 @@ def make(app, www="/www", timeout_ms=REQUEST_TIMEOUT_MS, token=None):
     @web.get("/editor.js")
     async def editor(req):
         return _asset(req, www + "/editor.js")
+
+    @web.get("/history.js")
+    async def history_js(req):
+        return _asset(req, www + "/history.js")
 
     @web.get("/api/state")
     async def state(req):

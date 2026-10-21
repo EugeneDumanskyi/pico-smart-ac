@@ -178,6 +178,7 @@ class App:
                     "fan": None if ac is None else ac.fan,
                 },
                 "dry_run": self._settings()["dry_run"],
+                "poll_s": self._settings()["poll_s"],
                 "shadow": self.shadow,
                 "profiles": [
                     {

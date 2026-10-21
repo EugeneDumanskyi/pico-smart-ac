@@ -524,3 +524,8 @@ class TestConfigRoutes(unittest.TestCase):
         [(status, body)] = exchange(get("/editor.js"))
         self.assertEqual(status, 200)
         self.assertTrue(body.startswith(b"// SPDX"))
+
+    def test_history_script(self):
+        [(status, body)] = exchange(get("/history.js"))
+        self.assertEqual(status, 200)
+        self.assertTrue(body.startswith(b"// SPDX"))
