@@ -381,6 +381,8 @@ function render(s) {
       + ", reconnects " + (d.wifi_reconnects ?? "–") + ", for the AC " + (d.ac_reconnects ?? "–")],
     ["IP", d.ip || "–"],
     ["firmware", d.fw],
+    ["LED", (s.unreachable_s != null ? "steady: the AC doesn't answer" : "dark: all well")
+      + "; it blinks fast without Wi-Fi"],
   ]);
   document.dispatchEvent(new CustomEvent("state", { detail: s }));
 }

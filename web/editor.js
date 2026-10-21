@@ -566,6 +566,7 @@
       ed.top,
       h("div", { class: "card grid" },
         text(ed, "ac_ip", "AC address", { placeholder: "from secrets.py", nullIfEmpty: true }),
+        testButton(ed),
         num(ed, "poll_s", "read the AC every, s", LIMITS.poll_s),
         num(ed, "hard_cap_min", "longest cycle, min", LIMITS.hard_cap_min),
         num(ed, "manual_hold_min", "hands off after the remote, min", LIMITS.manual_hold_min),
@@ -576,6 +577,30 @@
         check(ed, "dry_run", "dry run: decide, never write to the AC",
           shadow && "locked: shadow mode runs dry whatever this says")),
     ];
+  }
+
+  function testButton(ed) {
+    // POST /api/ac/test with the address typed (saved or not); empty: the one in use. Read-only on the AC.
+    const out = h("span", { class: "lock", "aria-live": "polite" });
+    const run = async () => {
+      const ip = ed.draft.ac_ip;
+      if (ip && !/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) { out.textContent = "not an IPv4 address"; return; }
+      b.disabled = true;
+      out.textContent = "testing…";
+      try {
+        const r = await api("POST", "/api/ac/test", ip ? { ip } : {});
+        const d = r.data || {};
+        if (r.status !== 200) out.textContent = d.error || "HTTP " + r.status;
+        else if (d.reachable) out.textContent = "answers at " + d.ip + ": " + (d.type || "?") + ", fw " + (d.fw || "?")
+          + (d.comm_err ? ", comm error " + d.comm_err : "") + ", " + d.ms + " ms";
+        else out.textContent = "no answer from " + (d.ip || "?") + " (" + d.error + ")";
+      } catch (e) {
+        out.textContent = "not tested: " + e.message;
+      }
+      b.disabled = false;
+    };
+    const b = button("Test connection", run);
+    return h("span", { class: "row" }, b, out);
   }
 
   const profilesEd = new Editor("Profiles", $("profiles"), "/api/profiles", profilesView,
