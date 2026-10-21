@@ -11,6 +11,7 @@ from sim.server import DEFAULT_PORT, serve
 from smartac.board.host import HostBoard
 from smartac.core import config
 from smartac.core import types as t
+from smartac.core.events import to_flash
 from smartac.shell.app import MAX_ACTIONS, SETTLE_MS, App
 from smartac.shell.store import MAX_EVENT_LINES, MemoryStore
 
@@ -189,6 +190,32 @@ class TestStore(unittest.TestCase):
         w = World()
         w.app()
         self.assertEqual(json.loads(w.store.events[0])["kind"], t.EV_BOOT)
+
+    def test_full_flash_counts_instead_of_resetting(self):
+        # The boot counters and the log can't be written; the profiles and the snapshot still can.
+        w = World("day")
+        w.store.reset_counts("power_on")
+        save = w.store.save
+
+        def full(name, doc):
+            if name in ("boot", "resets"):
+                raise OSError(28)
+            save(name, doc)
+
+        w.store.save = full
+        w.store.fail_append = True
+        app = w.app()
+        self.assertEqual((app.boot, app.resets), (1, {"power_on": 2}))
+        self.assertEqual(app.status()["config_warning"], "boot: flash write failed, counters not saved")
+        self.assertEqual(app.log_errors, 1)  # the boot event
+        w.run(app, 70 * 1000)
+        self.assertEqual(app.controller.state, t.RUNNING)
+        app.log(t.EV_HEAP, "free 1 block 1")
+        kinds = [r["kind"] for r in app.event_rows(100)]
+        self.assertEqual(kinds, [t.EV_CYCLE_START, t.EV_BOOT])  # the RAM ring has them all
+        refused = len([k for k in kinds if to_flash(k, app.events.flash_kinds)]) + 1  # and the heap line
+        self.assertEqual((w.store.events, app.status()["device"]["log_errors"]), ([], refused))
+        self.assertEqual(w.app().boot, 1)  # still unsaved: the next boot counts from the same value
 
 
 class TestObserve(unittest.TestCase):

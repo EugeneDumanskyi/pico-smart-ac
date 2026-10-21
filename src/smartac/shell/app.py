@@ -69,11 +69,12 @@ class App:
         self.ac_port = ac_port
         self.observe = observe
         self.shadow = shadow
-        self.boot = store.next_boot()
-        self.reset_cause = board.reset_cause()
-        self.resets = store.reset_counts(self.reset_cause)
-        self.crash = _crash_line(store.load_crash())
         self.warnings = []
+        self.log_errors = 0  # event lines the flash refused (full)
+        self.boot = self._count(store.next_boot)
+        self.reset_cause = board.reset_cause()
+        self.resets = self._count(lambda save: store.reset_counts(self.reset_cause, save))
+        self.crash = _crash_line(store.load_crash())
         settings = self._load("settings", config.validate_settings, config.default_settings(ac_ip))
         self.settings = settings
         self.client = None
@@ -111,6 +112,16 @@ class App:
         self.write_errors = 0
         self.last_write_error = None
         self._event(now, EV_BOOT, "boot %d (%s)" % (self.boot, self.reset_cause))
+
+    def _count(self, count):
+        # A boot or reset counter. One the flash can't take (full) stays in RAM: the board runs on (a reset here
+        # would loop), the page shows the warning, and the next boot counts from the saved value again.
+        try:
+            return count(True)
+        except OSError:
+            if not any(w["path"] == "boot" for w in self.warnings):
+                self.warnings.append({"path": "boot", "msg": "flash write failed, counters not saved"})
+            return count(False)
 
     def _load(self, name, validate, default):
         doc = self.store.load(name)
@@ -150,6 +161,7 @@ class App:
             "reset_cause": self.reset_cause,
             "resets": self.resets,
             "last_crash": self.crash,
+            "log_errors": self.log_errors,
         }
         device.update(self.board.device_info())
         device.update(self.stats)
@@ -238,7 +250,7 @@ class App:
         # To events.log only, not the RAM ring: the hourly heap line (housekeeping) would crowd real events out of it.
         self._now()
         temp, hum = self._sensors()
-        self.store.append_event(to_line(self.events.boot, self.uptime_ms, kind, msg, temp, hum))
+        self._append(to_line(self.events.boot, self.uptime_ms, kind, msg, temp, hum))
 
     # --- config documents (idea.md, "HTTP API": /api/profiles, /api/settings)
     # The handlers return (status, body). A save validates, writes the file (FileStore: .tmp, .bak, rename) and
@@ -440,7 +452,12 @@ class App:
         temp, hum = self._sensors()
         line = self.events.add(now, self.uptime_ms, kind, msg, temp, hum)
         if line is not None:
-            self.store.append_event(line)
+            self._append(line)
+
+    def _append(self, line):
+        # A line the flash refuses (full) is counted, and the RAM ring keeps the event.
+        if not self.store.append_event(line):
+            self.log_errors += 1
 
     def _now(self):
         # Board ticks; uptime is summed tick to tick, so it survives the ticks wrap.

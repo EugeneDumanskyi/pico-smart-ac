@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Persistence (architecture.md, "Persistence and flash"). MemoryStore for the host runner and tests, FileStore for
 # the Pico's flash; both keep this API:
-#   load(name) -> parsed document or None, save(name, doc), append_event(line), next_boot() -> int,
-#   load_crash() -> text or None, save_crash(text), reset_counts(cause) -> {cause: count},
+#   load(name) -> parsed document or None, save(name, doc), append_event(line) -> False if the flash refused it,
+#   next_boot(save=True) -> int, load_crash() -> text or None, save_crash(text),
+#   reset_counts(cause, save=True) -> {cause: count},
 #   read_events() -> the event log as text pieces, oldest first (GET /api/log)
+# save() and the counters raise OSError when the flash is full (save=False: the count without saving it).
 # Documents: "profiles", "settings", "state" (the controller snapshot), "boot" (the boot counter),
 # "resets" (resets by cause).
 import json
@@ -21,14 +23,15 @@ def _count(v):
 
 
 class _Store:
-    def next_boot(self):
+    def next_boot(self, save=True):
         # Count this boot and return its number (1 on a fresh store).
         doc = self.load("boot")
         n = _count(doc.get("count") if isinstance(doc, dict) else None) + 1
-        self.save("boot", {"count": n})
+        if save:
+            self.save("boot", {"count": n})
         return n
 
-    def reset_counts(self, cause):
+    def reset_counts(self, cause, save=True):
         # Count this boot's reset cause; call once per boot. -> every cause seen so far with its count.
         doc = self.load("resets")
         counts = {}
@@ -37,7 +40,8 @@ class _Store:
                 if _count(v):
                     counts[k] = v
         counts[cause] = counts.get(cause, 0) + 1
-        self.save("resets", counts)
+        if save:
+            self.save("resets", counts)
         return counts
 
 
@@ -47,6 +51,7 @@ class MemoryStore(_Store):
         self.docs = {}
         self.events = []
         self.crash = None
+        self.fail_append = False  # tests: a flash that refuses the log
 
     def load(self, name):
         text = self.docs.get(name)
@@ -61,9 +66,12 @@ class MemoryStore(_Store):
         self.docs[name] = json.dumps(doc)
 
     def append_event(self, line):
+        if self.fail_append:
+            return False
         self.events.append(line)
         if len(self.events) > MAX_EVENT_LINES:
             self.events.pop(0)
+        return True
 
     def read_events(self):
         for line in self.events:
@@ -129,15 +137,20 @@ class FileStore(_Store):
         os.rename(path + ".tmp", path)
 
     def append_event(self, line):
+        # -> False if the flash refused the line (full): the log is a record, never a reason to reset.
         path = self.root + "events.log"
         try:
             size = os.stat(path)[6]
         except OSError:
             size = 0
-        if size and size + len(line) + 1 > EVENT_LOG_BYTES:
-            os.rename(path, self.root + "events.1.log")
-        with open(path, "a") as f:
-            f.write(line + "\n")
+        try:
+            if size and size + len(line) + 1 > EVENT_LOG_BYTES:
+                os.rename(path, self.root + "events.1.log")
+            with open(path, "a") as f:
+                f.write(line + "\n")
+        except OSError:
+            return False
+        return True
 
     def read_events(self):
         # events.1.log, then events.log, in READ_CHUNK pieces. Each piece opens and closes the file, so none is held

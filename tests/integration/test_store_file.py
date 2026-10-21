@@ -152,7 +152,7 @@ class Cases:
         s = FileStore(self.root)
         per_file = EVENT_LOG_BYTES // 100  # 100-byte lines, newline included
         for i in range(per_file):
-            s.append_event("%099d" % i)
+            self.assertTrue(s.append_event("%099d" % i))
         self.assertEqual(sorted(os.listdir(self.root)), ["events.log"])
         self.assertEqual(os.stat(self.root + "/events.log")[6], per_file * 100)
         s.append_event("%099d" % per_file)  # doesn't fit any more
@@ -292,3 +292,5 @@ class TestLittlefs(Cases, unittest.TestCase):
             s.save("profiles", {"v": "x" * 4096})
         self.assertEqual([x for x in os.listdir(self.root) if x.startswith("profiles")], ["profiles.json"])
         self.assertEqual(s.load("profiles"), {"v": 1})
+        # The log refuses the line instead of raising.
+        self.assertFalse(s.append_event("x" * 4096))
