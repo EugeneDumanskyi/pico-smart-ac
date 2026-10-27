@@ -517,8 +517,8 @@ class TestConfigSave(unittest.TestCase):
         self.assertEqual(app.controller.profiles, dict(config.default_profiles(), active="day"))  # not yet
         w.run(app, 4 * 60 * 60 * 1000)
         starts, phases = event_times(w, t.EV_CYCLE_START), event_times(w, t.EV_PHASE)
-        # The first cycle (humid, from 1:00) runs its 60 min dry phase; the next one (after the cooldown) 10 min.
-        self.assertEqual(phases[0] - starts[0], 60 * 60 * 1000)
+        # The first cycle (humid, from 1:00) runs its 40 min cool phase; the next one (after the cooldown) 10 min.
+        self.assertEqual(phases[0] - starts[0], 40 * 60 * 1000)
         second = [p for p in phases if p > starts[1]][0]
         self.assertEqual(second - starts[1], 10 * 60 * 1000)
         self.assertEqual(app.controller.profiles["profiles"]["day"]["rules"][1]["phases"][0]["max_min"], 10)
@@ -546,8 +546,8 @@ class TestConfigSave(unittest.TestCase):
         status, body = app.save_profiles(doc)
         self.assertEqual(status, 400)
         self.assertEqual(body["errors"][0]["path"], "profiles.day.rules[0].phases[0].target_c")
-        status, body = app.save_settings(dict(config.default_settings(HOST), hard_cap_min=60))
-        self.assertEqual((status, body["errors"][0]["path"]), (400, "hard_cap_min"))  # day.humid needs 80 min
+        status, body = app.save_settings(dict(config.default_settings(HOST), hard_cap_min=50))
+        self.assertEqual((status, body["errors"][0]["path"]), (400, "hard_cap_min"))  # the humid rules need 60 min
         self.assertEqual((app.pending, w.store.load("settings")), ({}, None))
         self.assertEqual(w.store.load("profiles")["profiles"], config.default_profiles()["profiles"])
 

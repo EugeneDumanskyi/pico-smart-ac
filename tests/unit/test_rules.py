@@ -84,6 +84,15 @@ class TestConditions(unittest.TestCase):
         self.assertFalse(r.goal_met(until, reading(hum=50)))
         self.assertFalse(r.goal_met(None, reading(temp=200)))
 
+    def test_goal_list_is_any(self):
+        hum, floor = cond("hum", "<=", 65), cond("temp", "<=", 25)
+        until = [hum, floor]
+        self.assertIs(r.goal_hit(until, reading(temp=270, hum=60)), hum)
+        self.assertIs(r.goal_hit(until, reading(temp=250, hum=70)), floor)
+        self.assertIs(r.goal_hit(until, reading(temp=250, hum=60)), hum)  # the first one met
+        self.assertIsNone(r.goal_hit(until, reading(temp=255, hum=66)))
+        self.assertIsNone(r.goal_hit([], reading(temp=200, hum=20)))
+
 
 class TestConfirmReads(unittest.TestCase):
     def setUp(self):

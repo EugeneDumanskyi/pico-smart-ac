@@ -57,7 +57,9 @@ def default_profiles():
                         "humid",
                         _when(_cond("hum", ">", 75)),
                         [
-                            _phase("cool", "3", 60, _cond("hum", "<=", 65), target_c=26),
+                            # The temp goal is a floor: on a very humid day hum may not get to 65 before the room
+                            # is too cold.
+                            _phase("cool", "3", 40, [_cond("hum", "<=", 65), _cond("temp", "<=", 25)], target_c=26),
                             _phase("fan", "3", 20),
                         ],
                         cooldown_min=30,
@@ -135,6 +137,7 @@ PHASE_MODES = ("cool", "dry", "fan")  # heat and auto are not offered in v1
 CONDITION_LIMITS = {"temp": (10, 45), "outdoor_temp": (10, 45), "hum": (20, 95)}
 # Sensors an `until` goal can sensibly wait for, per mode (both fall while the mode runs).
 GOAL_SENSORS = {"cool": ("temp", "hum"), "dry": ("hum", "temp")}
+MAX_GOALS = 2
 
 PROFILES_KEYS = ("version", "active", "profiles")
 PROFILE_KEYS = ("label", "rules")
@@ -255,13 +258,22 @@ def _check_phase(rep, path, p):
     elif target is not None:
         rep.error(_join(path, "target_c"), "only for cool")
     until = p.get("until")
-    if until is not None:
-        upath = _join(path, "until")
-        n = len(rep.errors)
-        _check_condition(rep, upath, until)
-        if len(rep.errors) == n and mode in PHASE_MODES:
-            if until["sensor"] not in GOAL_SENSORS.get(mode, ()) or until["op"] not in FALLING_OPS:
-                rep.warn(upath, "%s may never reach this goal; the phase will run its full time" % mode)
+    upath = _join(path, "until")
+    if isinstance(until, list):
+        # Several goals: the phase ends when any of them is met.
+        if _list_len(rep, upath, until, 1, MAX_GOALS, "goals"):
+            for i, c in enumerate(until):
+                _check_goal(rep, _join(upath, i), c, mode)
+    elif until is not None:
+        _check_goal(rep, upath, until, mode)
+
+
+def _check_goal(rep, path, c, mode):
+    n = len(rep.errors)
+    _check_condition(rep, path, c)
+    if len(rep.errors) == n and mode in PHASE_MODES:
+        if c["sensor"] not in GOAL_SENSORS.get(mode, ()) or c["op"] not in FALLING_OPS:
+            rep.warn(path, "%s may never reach this goal; the phase will run its full time" % mode)
 
 
 def _check_rule(rep, path, r, hard_cap_min):

@@ -209,6 +209,23 @@ class TestPhases(unittest.TestCase):
         self.assertEqual(summary(cmds), [("event", t.EV_PHASE), ("write", FAN3), ("persist",)])
         self.assertEqual(rig.snap["cycle"]["phase"], 1)
 
+    def test_any_goal_ends_phase(self):
+        # Two goals: whichever is met first ends the phase, and the event names it.
+        humid = rule("humid", cond("hum", ">", 75), [
+            phase("cool", 40, until=[cond("hum", "<=", 65), cond("temp", "<=", 25)], target=26), phase("fan", 20)])
+        for sensor, value, goal in (("hum", 65, "hum <= 65"), ("temp", 250, "temp <= 25")):
+            rig = Rig([humid])
+            rig.hum, rig.temp = 80, 270
+            rig.poll()
+            rig.readback()
+            rig.hum = 70
+            self.assertEqual(rig.status()["cycle"]["goal"], "hum <= 65 or temp <= 25")
+            self.assertEqual(rig.polls(5), [])
+            setattr(rig, sensor, value)
+            cmds = rig.poll()
+            self.assertEqual(events(cmds), [t.EV_PHASE])
+            self.assertIn("(goal %s)" % goal, msgs(cmds)[0])
+
     def test_max_min_ends_phase(self):
         rig = Rig()
         rig.start_hot()

@@ -45,9 +45,17 @@ def when_met(when, reading):
     return False
 
 
+def goal_hit(until, reading):
+    # A phase's optional `until` goal: one condition, or a list of them that ends the phase when any is met. Returns
+    # the condition met, or None (always None for no goal: the phase runs its full max_min).
+    for cond in until if isinstance(until, list) else () if until is None else (until,):
+        if condition_met(cond, reading):
+            return cond
+    return None
+
+
 def goal_met(until, reading):
-    # A phase's optional `until` goal; None means the phase runs its full max_min.
-    return until is not None and condition_met(until, reading)
+    return goal_hit(until, reading) is not None
 
 
 class RuleSelector:

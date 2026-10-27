@@ -9,7 +9,7 @@
 import json
 
 from smartac.core.config import OFF
-from smartac.core.rules import RuleSelector, goal_met
+from smartac.core.rules import RuleSelector, goal_hit
 from smartac.core.types import (
     ACT_CLEAR_MANUAL,
     ACT_PAUSE,
@@ -129,6 +129,8 @@ def _describe(st):
 def _goal_text(until):
     if until is None:
         return None
+    if isinstance(until, list):
+        return " or ".join(_goal_text(c) for c in until)
     return "%s %s %s" % (until.get("sensor"), until.get("op"), until.get("value"))
 
 
@@ -539,9 +541,9 @@ class Controller:
                 self.state = STOPPING
             elif self.phase_start is not None:
                 phase = c["rule"]["phases"][c["phase"]]
-                until = phase.get("until")
-                if goal_met(until, reading):
-                    self._next_phase(out, "goal " + _goal_text(until))
+                hit = goal_hit(phase.get("until"), reading)
+                if hit is not None:
+                    self._next_phase(out, "goal " + _goal_text(hit))
                 elif ticks_since(now, self.phase_start) >= phase["max_min"] * MIN_MS:
                     self._next_phase(out, "%d min" % phase["max_min"])
 

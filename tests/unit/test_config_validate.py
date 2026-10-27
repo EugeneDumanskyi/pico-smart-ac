@@ -231,13 +231,24 @@ class TestPhases(ProfileCase):
         self.phase(doc)["until"] = {"sensor": "temp", "op": "<=", "value": 5}
         self.assertRejects(doc, self.P + "[0].until.value")
 
+    def test_until_may_be_a_list_of_goals(self):
+        doc = profiles()
+        self.phase(doc)["until"] = [{"sensor": "temp", "op": "<=", "value": 26},
+                                    {"sensor": "hum", "op": "<=", "value": 65}]
+        self.assertEqual(self.check(doc), [])
+        self.phase(doc)["until"][1]["value"] = 5
+        self.assertRejects(doc, self.P + "[0].until[1].value")
+        for bad in ([], [{"sensor": "temp", "op": "<=", "value": 26}] * 3):
+            self.phase(doc)["until"] = bad
+            self.assertRejects(doc, self.P + "[0].until")
+
     def test_sum_within_hard_cap(self):
         doc = profiles()
         self.phase(doc)["max_min"] = 101  # 101 + 20
         msg = self.assertRejects(doc, self.P)
         self.assertIn("121", msg)
         self.assertEqual(self.check(doc, hard_cap_min=121), [])
-        self.assertRejects(profiles(), "profiles.day.rules[1].phases", hard_cap_min=60)  # humid: 80 min
+        self.assertRejects(profiles(), "profiles.day.rules[1].phases", hard_cap_min=59)  # humid: 60 min
 
 
 class TestWarnings(ProfileCase):
@@ -252,6 +263,13 @@ class TestWarnings(ProfileCase):
             first_rule(doc)["phases"][0]["until"] = until
             self.assertEqual(self.check(doc), [])
             self.assertEqual(paths(self.warnings), [self.P + "[0].until"])
+
+    def test_each_goal_in_a_list_is_warned_about(self):
+        doc = profiles()
+        first_rule(doc)["phases"][0]["until"] = [{"sensor": "hum", "op": "<=", "value": 65},
+                                                 {"sensor": "temp", "op": ">=", "value": 30}]
+        self.assertEqual(self.check(doc), [])
+        self.assertEqual(paths(self.warnings), [self.P + "[0].until[1]"])
 
     def test_goal_on_fan_phase(self):
         doc = profiles()
@@ -346,10 +364,11 @@ class TestSettings(unittest.TestCase):
 
     def test_hard_cap_against_current_profiles(self):
         s = config.default_settings()
-        s["hard_cap_min"] = 60
+        s["hard_cap_min"] = 50
         errors = config.validate_settings(s, profiles())[0]
-        self.assertEqual(paths(errors), ["hard_cap_min"])  # only day.humid (80 min); 60 still fits
-        self.assertIn("profiles.day.rules[1]", errors[0]["msg"])
+        self.assertEqual(paths(errors), ["hard_cap_min", "hard_cap_min"])  # the two humid rules (60 min); 50 fits
+        self.assertEqual(sorted(e["msg"] for e in errors),
+                         ["profiles.day.rules[1] needs 60 min", "profiles.night.rules[1] needs 60 min"])
 
 
 # --- idea.md's "Validation" table, row by row: one accepted and one rejected change each ---

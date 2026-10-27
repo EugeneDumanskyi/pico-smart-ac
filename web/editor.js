@@ -14,7 +14,7 @@
     poll_s: [30, 300, 10], hard_cap_min: [30, 480, 10], manual_hold_min: [10, 480, 10],
     manual_release_off_min: [5, 240, 5], finish_fan_min: [0, 60, 5], limit_temp: [0, 60, 1], limit_hum: [0, 100, 1],
   };
-  const MAX = { profiles: 10, rules: 8, conditions: 4, phases: 5 };
+  const MAX = { profiles: 10, rules: 8, conditions: 4, phases: 5, goals: 2 };
   const MODES = ["cool", "dry", "fan"];
   const FANS = ["auto", "quiet", "1", "2", "3", "4", "5"];
   const SENSORS = [["temp", "temp"], ["hum", "humidity"], ["outdoor_temp", "outdoor"]];
@@ -366,8 +366,13 @@
   const condText = (c, goal) => (c.sensor === goal ? "" : (SENSOR_TEXT[c.sensor] || c.sensor) + " ")
     + (OP_TEXT[c.op] || c.op) + " " + c.value;
 
+  // A phase's `until`: null, one condition, or a list of them (the phase ends when any is met).
+  const goals = (p) => (p.until == null ? [] : Array.isArray(p.until) ? p.until : [p.until]);
+
   function phaseText(p) {
-    const until = p.until ? " (stop early at " + condText(p.until, GOAL[p.mode]) + ")" : "";
+    const gs = goals(p);
+    const until = gs.length ? " (stop early at "
+      + (gs.length === 1 ? condText(gs[0], GOAL[p.mode]) : gs.map((c) => condText(c)).join(" or ")) + ")" : "";
     if (p.mode === "cool") return "cool to " + p.target_c + " for up to " + p.max_min + " min" + until;
     if (p.mode === "fan" && !p.until) return "fan " + p.max_min + " min";
     return p.mode + " for up to " + p.max_min + " min" + until;
@@ -416,6 +421,12 @@
     return { sensor: "temp", op: "<=", value: 26 };
   }
 
+  function nextGoal(p, gs) {
+    // A second goal: a temperature floor for a humidity goal, else humidity.
+    if (!gs.some((c) => c.sensor === "temp")) return { sensor: "temp", op: "<=", value: (p.target_c ?? 26) - 1 };
+    return { sensor: "hum", op: "<=", value: 65 };
+  }
+
   function setMode(p, mode) {
     p.mode = mode;
     if (mode === "cool") p.target_c = p.target_c ?? 26;
@@ -431,8 +442,14 @@
 
   function phaseBlock(ed, path, phases, k, listPath) {
     const p = phases[k];
-    const stop = h("input", { type: "checkbox", checked: p.until != null });
+    const gs = goals(p);
+    const stop = h("input", { type: "checkbox", checked: gs.length > 0 });
     stop.addEventListener("change", () => ed.edit(() => { p.until = stop.checked ? goalFor(p) : null; }));
+    const drop = (j) => ed.edit(() => { gs.splice(j, 1); p.until = gs.length > 1 ? gs : gs[0] ?? null; });
+    const goalRows = Array.isArray(p.until)
+      ? gs.map((c, j) => condRow(ed, path + ".until[" + j + "]", c,
+        button("×", () => drop(j), { title: "remove", "aria-label": "remove goal" })))
+      : gs.map((c) => condRow(ed, path + ".until", c));
     return h("div", { class: "phase", "data-block": path },
       h("div", { class: "grid" },
         sel(ed, path + ".mode", "phase " + (k + 1), MODES, (v) => setMode(p, v)),
@@ -441,7 +458,9 @@
         num(ed, path + ".max_min", "up to min", LIMITS.max_min)),
       h("div", { class: "row", "data-block": path + ".until" },
         h("label", null, stop, " stop early at"),
-        p.until != null && condRow(ed, path + ".until", p.until)),
+        gs.length > 0 && h("div", null, goalRows,
+          gs.length < MAX.goals && h("div", { class: "tools" },
+            button("+ or", () => ed.edit(() => { p.until = [...gs, nextGoal(p, gs)]; }), { title: "add a goal" })))),
       moves(ed, phases, k, listPath, 1));
   }
 

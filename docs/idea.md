@@ -49,7 +49,7 @@ profile
       ├── phases[]     run in order; each has a mode and ends on time OR a goal, whichever comes first
       │     ├── mode, target temp, fan speed
       │     ├── max_min
-      │     └── until    optional goal, e.g. temp <= 26 or humidity <= 65
+      │     └── until    optional goal, e.g. temp <= 26, or two goals: humidity <= 65 or temp <= 25
       ├── end          power off (always)
       └── cooldown     minutes to wait before triggers are checked again
 ```
@@ -66,7 +66,7 @@ This is our own mold-proof, and it's easy to stop.
 | Rule | Trigger | Phases | Cooldown |
 |---|---|---|---|
 | too hot | temp > 29 | cool, target 26, **30 min or until temp ≤ 26**; then fan 20 min | 20 min |
-| humid | humidity > 75 | cool, target 26, **60 min or until humidity ≤ 65**; then fan 20 min | 30 min |
+| humid | humidity > 75 | cool, target 26, **40 min or until humidity ≤ 65 or temp ≤ 25**; then fan 20 min | 30 min |
 
 First match wins, so a hot and humid room is cooled first. Humid days are cooled too, not dried: in the M3 shadow
 run every dry cycle by day was overridden to cool by hand (see "Tuning" below). Dry mode stays in `night` and `away`.
@@ -222,8 +222,8 @@ warning on the page.
          "when": {"match": "all", "conditions": [{"sensor": "hum", "op": ">", "value": 75}]},
          "confirm_reads": 2,
          "phases": [
-           {"mode": "cool", "target_c": 26, "fan": "3", "max_min": 60,
-            "until": {"sensor": "hum", "op": "<=", "value": 65}},
+           {"mode": "cool", "target_c": 26, "fan": "3", "max_min": 40,
+            "until": [{"sensor": "hum", "op": "<=", "value": 65}, {"sensor": "temp", "op": "<=", "value": 25}]},
            {"mode": "fan", "fan": "3", "max_min": 20, "until": null}
          ],
          "cooldown_min": 30, "min_interval_min": 0}
@@ -236,6 +236,7 @@ warning on the page.
 - `active`: a profile name or `"off"`.
 - `sensor`: `temp`, `hum`, `outdoor_temp` (later: `dew_point`, external sensor values).
 - `op`: `>`, `>=`, `<`, `<=`. `match`: `all` (AND) or `any` (OR).
+- `until`: `null`, one condition, or a list of up to 2; the phase ends when any of them is met (or at `max_min`).
 - `mode`: `cool`, `dry`, `fan` (`heat`, `auto` allowed by the AC but not offered in the UI).
 - `fan`: `auto`, `quiet`, `1`..`5`. `target_c`: only for `cool`, in 0.5 °C steps. Dry has no target temperature:
   the unit takes a relative offset (0 to −3.0 in 0.5 steps, set on the remote), which v1 leaves as the remote set it.
@@ -275,7 +276,7 @@ warning on the page.
 | phases per rule | 1–5; rules per profile 1–8; profiles ≤ 10 |
 | names | `[a-z0-9_]{1,24}`, unique |
 | document size | ≤ 16 KB |
-| `until` | must refer to a sensor that moves the right way for the mode (warning only) |
+| `until` | one condition or a list of 1–2; each must refer to a sensor that moves the right way for the mode (warning only) |
 | last phase | warning if a rule with cool/dry does not end with a fan phase |
 
 Errors come back as a list with JSON paths, e.g.
@@ -422,6 +423,9 @@ would have done, without writing. Every `would` was checked against the room his
   (20 min after `too_hot`, 30 after `humid`) so a room that warms up again is cooled sooner.
 - **Takeover of a fan run**: when a hold ended, the Pico would have switched off a fan left running by hand,
   many times and mostly at night. A fan run is now left alone (see "TAKEOVER").
+- **Day `humid`, after the first live day** (2026-10-27): the cool phase reached 65 % and 26 °C together, but on a
+  very humid day (say 95 %) humidity may not reach 65 % before the room is too cold. It now stops at 40 min or at
+  25 °C, whichever comes first: `until` takes a second goal.
 - Event times are approximate when nobody is in the room: a trigger can fire with no one there to react.
 - Not changed: profiles are still chosen by hand (ADR 0004). Forgetting to switch profile in the morning happened;
   a relative "night for 8 h, then day" timer is in "Later ideas" ("Profile timer").

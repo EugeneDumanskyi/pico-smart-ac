@@ -19,9 +19,8 @@ def summary(rule):
     phases = []
     for p in rule["phases"]:
         u = p["until"]
-        phases.append(
-            (p["mode"], p.get("target_c"), p["fan"], p["max_min"], u and (u["sensor"], u["op"], u["value"]))
-        )
+        goals = [(g["sensor"], g["op"], g["value"]) for g in (u if isinstance(u, list) else [u] if u else [])]
+        phases.append((p["mode"], p.get("target_c"), p["fan"], p["max_min"], goals))
     return (rule["name"], (c["sensor"], c["op"], c["value"]), phases, rule["cooldown_min"], rule["min_interval_min"])
 
 
@@ -40,14 +39,14 @@ class TestDefaultProfiles(unittest.TestCase):
                 (
                     "too_hot",
                     ("temp", ">", 29),
-                    [("cool", 26, "3", 30, ("temp", "<=", 26)), ("fan", None, "3", 20, None)],
+                    [("cool", 26, "3", 30, [("temp", "<=", 26)]), ("fan", None, "3", 20, [])],
                     20,
                     0,
                 ),
                 (
                     "humid",
                     ("hum", ">", 75),
-                    [("cool", 26, "3", 60, ("hum", "<=", 65)), ("fan", None, "3", 20, None)],
+                    [("cool", 26, "3", 40, [("hum", "<=", 65), ("temp", "<=", 25)]), ("fan", None, "3", 20, [])],
                     30,
                     0,
                 ),
@@ -61,14 +60,14 @@ class TestDefaultProfiles(unittest.TestCase):
                 (
                     "warm",
                     ("temp", ">", 27),
-                    [("cool", 25, "3", 20, ("temp", "<=", 25)), ("fan", None, "3", 15, None)],
+                    [("cool", 25, "3", 20, [("temp", "<=", 25)]), ("fan", None, "3", 15, [])],
                     30,
                     0,
                 ),
                 (
                     "humid",
                     ("hum", ">", 75),
-                    [("dry", None, "3", 45, ("hum", "<=", 65)), ("fan", None, "3", 15, None)],
+                    [("dry", None, "3", 45, [("hum", "<=", 65)]), ("fan", None, "3", 15, [])],
                     45,
                     0,
                 ),
@@ -78,7 +77,7 @@ class TestDefaultProfiles(unittest.TestCase):
     def test_away(self):
         self.assertEqual(
             [summary(r) for r in rules_of("away")],
-            [("damp", ("hum", ">", 80), [("dry", None, "3", 30, None), ("fan", None, "3", 20, None)], 0, 240)],
+            [("damp", ("hum", ">", 80), [("dry", None, "3", 30, []), ("fan", None, "3", 20, [])], 0, 240)],
         )
 
     def test_fresh_copy_each_call(self):

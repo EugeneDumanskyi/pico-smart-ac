@@ -473,7 +473,7 @@ class TestConfigRoutes(unittest.TestCase):
 
     def test_settings(self):
         store = MemoryStore()
-        low_cap = dict(config.default_settings("127.0.0.1"), hard_cap_min=60)
+        low_cap = dict(config.default_settings("127.0.0.1"), hard_cap_min=50)
         owner = dict(config.default_settings("127.0.0.1"), dry_run=False, poll_s=90)
 
         async def tick(app):
