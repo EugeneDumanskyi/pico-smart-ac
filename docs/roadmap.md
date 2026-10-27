@@ -192,9 +192,10 @@ connection checked in headless Chrome at 390 px against `make dev DEV_LIVE=1` (e
 disabled in the others, the dialog, an `ignored` event, a good and a wrong address); `tools/build_web.py`: 15.5 KB
 gzipped of the 60 KB budget; the supervised runner uses `/api/action`.
 
-Left, after M3's run is reviewed, in the same Pico session as M6 and M4's Pico half: deploy; heap while serving the
-gzipped page; the phone checklist in shadow mode (every button → its event, no token → 401, Test connection with the
-real and a wrong address); then M4's P1–P4 driven by the buttons; merge.
+**Result** (2026-10-27): done on the phone (a Home Screen web app) against the Pico, still in shadow mode: no token →
+401; Pause/Resume, Run, Stop (→ the fan phase) and Stop now (→ off) each logged its event. Moved to M4's P1, which
+needs the MANUAL state: Clear manual hold. Moved to the UI polish: Stop in the last fan phase does nothing visible and
+logs nothing.
 
 ## M6: Profile and settings editor
 
@@ -217,8 +218,9 @@ owner's `dry_run` in the file); the routes (idea.md, "HTTP API"); power cuts inj
 checked in headless Chrome at phone width (each kind of error marks its field or block, save, revert, restore
 defaults, rename, copy a rule). Page size: about 39 KB before gzip.
 
-Left, after M3's run is reviewed: deploy; heap during a 16 KB PUT and the new sizes in `firmware.md`; the phone
-checklist; `tests/device/save_check.py` with about 5 USB pulls mid-save; then merge to `main`.
+**Result** (2026-10-27): done on the Pico. Every field error marked its field and refused the save; the Settings tab
+saved and read back; `tests/device/save_check.py` PASS in 5 of 5 USB pulls mid-save (two rounds booted from `.bak`);
+a 16 KB PUT (16 020 bytes) saved with no `low_memory` event. Merged to `main`.
 
 ## M7: v1.0
 
