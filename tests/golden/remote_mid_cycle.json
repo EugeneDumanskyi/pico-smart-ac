@@ -6,9 +6,9 @@
   "start_ms": 0,
   "snapshot": null,
   "steps": [
-    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 30, "hum": 70},
-    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "auto"]], ["persist"]]}},
-    {"t_s": 65, "readback": true, "ac": [true, "cool", 26, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 0, "ac": [false, "cool", 26, "3"], "temp": 30, "hum": 70},
+    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "3"]], ["persist"]]}},
+    {"t_s": 65, "readback": true, "ac": [true, "cool", 26, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 120, "to_s": 240, "temp": 29},
     {"t_s": 300, "ac": [true, "cool", 24, "2"], "expect": {"state": "MANUAL", "cmds": [["event", "manual"], ["persist"]]}},
     {"t_s": 360, "to_s": 540, "temp": 27, "expect": {"state": "MANUAL"}},

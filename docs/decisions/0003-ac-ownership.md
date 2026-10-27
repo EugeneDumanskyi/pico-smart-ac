@@ -23,6 +23,8 @@ also mid-cycle. Automation must never fight a human, and must not let a forgotte
    booted) gets `manual_hold_min` hands off; every new change restarts the hold. If the AC goes off and stays off for
    `manual_release_off_min`, back to `IDLE`. If the hold ends with the AC still on, `TAKEOVER`: fan for
    `finish_fan_min` if it was cooling or drying, then off. No takeover in the `off` profile or while paused.
+   Amended 2026-10-27 (M3 review): no takeover of a run in fan mode either; it runs until it is switched off or
+   changed. Stop, Stop now and Clear manual still end it.
 5. **Stopping is a state.** `STOPPING` repeats the off write each tick until a read confirms it. `COOLDOWN` starts only then.
    Any read that shows the AC off ends the stop, whoever switched it off; failed attempts give an event, not `MANUAL`.
 6. **Hard cap is absolute.** At `hard_cap_min` total cycle time, off is written directly, skipping any fan phase.

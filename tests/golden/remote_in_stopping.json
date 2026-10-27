@@ -6,9 +6,9 @@
   "start_ms": 0,
   "snapshot": null,
   "steps": [
-    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 30, "hum": 70, "expect": {"state": "IDLE"}},
-    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "auto"]], ["persist"]]}},
-    {"t_s": 65, "readback": true, "ac": [true, "cool", 26, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 0, "ac": [false, "cool", 26, "3"], "temp": 30, "hum": 70, "expect": {"state": "IDLE"}},
+    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "3"]], ["persist"]]}},
+    {"t_s": 65, "readback": true, "ac": [true, "cool", 26, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 120, "temp": 26, "expect": {"state": "RUNNING", "cmds": [["event", "phase"], ["write", [true, "fan", null, "3"]], ["persist"]]}},
     {"t_s": 125, "readback": true, "ac": [true, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 180, "to_s": 1260, "expect": {"state": "RUNNING"}},
@@ -19,8 +19,8 @@
     {"t_s": 1500, "to_s": 1680, "expect": {"state": "MANUAL"}},
     {"t_s": 1740, "expect": {"state": "IDLE", "cmds": [["persist"]]}},
     {"t_s": 1800, "temp": 30, "expect": {"state": "IDLE"}},
-    {"t_s": 1860, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "auto"]], ["persist"]]}},
-    {"t_s": 1865, "readback": true, "ac": [true, "cool", 26, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 1860, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "3"]], ["persist"]]}},
+    {"t_s": 1865, "readback": true, "ac": [true, "cool", 26, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 1920, "temp": 26, "expect": {"state": "RUNNING", "cmds": [["event", "phase"], ["write", [true, "fan", null, "3"]], ["persist"]]}},
     {"t_s": 1925, "readback": true, "ac": [true, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 1980, "to_s": 3060, "expect": {"state": "RUNNING"}},
@@ -30,7 +30,7 @@
     {"t_s": 3185, "readback": true, "expect": {"state": "STOPPING", "cmds": [["event", "write_failed"]]}},
     {"t_s": 3240, "expect": {"state": "STOPPING", "cmds": [["write", [false, "fan", null, "3"]]]}},
     {"t_s": 3245, "readback": true, "expect": {"state": "STOPPING"}},
-    {"t_s": 3300, "ac": [false, "cool", 25, "auto"], "expect": {"state": "COOLDOWN", "cmds": [["event", "cycle_end"], ["persist"]]}},
+    {"t_s": 3300, "ac": [false, "cool", 25, "3"], "expect": {"state": "COOLDOWN", "cmds": [["event", "cycle_end"], ["persist"]]}},
     {"t_s": 3360, "expect": {"state": "COOLDOWN"}}
   ]
 }

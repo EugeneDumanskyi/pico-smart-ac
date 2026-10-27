@@ -268,7 +268,12 @@ class Controller:
             s["cooldown_left_s"] = _secs(c["cooldown_min"] * MIN_MS - ticks_since(now, self.cooldown_start))
         elif st == MANUAL:
             left = self.settings["manual_hold_min"] * MIN_MS - ticks_since(now, self.hold_start)
-            s["manual_left_s"] = 0 if self.hold_over else _secs(left)
+            if self.hold_over:
+                s["manual_left_s"] = 0
+            elif left <= 0 and self.seen is not None and self.seen.mode == MODE_FAN:
+                s["manual_left_s"] = None  # a fan run by hand: no takeover
+            else:
+                s["manual_left_s"] = _secs(left)
         elif st == PAUSED and self.pause["minutes"] is not None:
             s["paused_left_s"] = _secs(self.pause["minutes"] * MIN_MS - ticks_since(now, self.pause["since"]))
         return s
@@ -511,10 +516,11 @@ class Controller:
             if not ac.power and self.off_ms >= st["manual_release_off_min"] * MIN_MS:
                 self._idle()
             elif self.hold_over or ticks_since(now, self.hold_start) >= st["manual_hold_min"] * MIN_MS:
-                if ac.power:
-                    self._takeover(now, ac, out, "manual hold over")
-                else:
+                if not ac.power:
                     self._idle()
+                elif self.hold_over or ac.mode != MODE_FAN:
+                    self._takeover(now, ac, out, "manual hold over")
+                # else: a fan run by hand is left alone (it dries the coil) until it is switched off.
 
         if self.state == IDLE and self.active != OFF:
             rules = self._rules()

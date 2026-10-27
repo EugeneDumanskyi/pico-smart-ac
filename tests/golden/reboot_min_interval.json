@@ -6,9 +6,9 @@
   "start_ms": 0,
   "snapshot": null,
   "steps": [
-    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 28, "hum": 85, "expect": {"state": "IDLE"}},
-    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "dry", null, "auto"]], ["persist"]]}},
-    {"t_s": 65, "readback": true, "ac": [true, "dry", null, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 0, "ac": [false, "cool", 26, "3"], "temp": 28, "hum": 85, "expect": {"state": "IDLE"}},
+    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "dry", null, "3"]], ["persist"]]}},
+    {"t_s": 65, "readback": true, "ac": [true, "dry", null, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 120, "to_s": 1800, "expect": {"state": "RUNNING"}},
     {"t_s": 1860, "expect": {"state": "RUNNING", "cmds": [["event", "phase"], ["write", [true, "fan", null, "3"]], ["persist"]]}},
     {"t_s": 1865, "readback": true, "ac": [true, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
@@ -18,6 +18,6 @@
     {"t_s": 3120, "expect": {"state": "IDLE", "cmds": [["event", "cycle_end"], ["persist"]]}},
     {"t_s": 3180, "reboot": true, "expect": {"state": "IDLE"}},
     {"t_s": 3240, "to_s": 17520, "expect": {"state": "IDLE"}},
-    {"t_s": 17580, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "dry", null, "auto"]], ["persist"]]}}
+    {"t_s": 17580, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "dry", null, "3"]], ["persist"]]}}
   ]
 }

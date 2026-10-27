@@ -241,7 +241,8 @@ function cycleText(s) {
   }
   if (s.state === "STOPPING") return (c.rule || "takeover") + ": switching off";
   if (s.state === "COOLDOWN") return "cooldown, " + mins(s.cooldown_left_s) + " left";
-  if (s.state === "MANUAL") return "hands off (AC set by hand), " + mins(s.manual_left_s) + " until takeover";
+  if (s.state === "MANUAL") return s.manual_left_s == null ? "hands off (fan set by hand, left running)"
+    : "hands off (AC set by hand), " + mins(s.manual_left_s) + " until takeover";
   if (s.state === "PAUSED") return s.paused_left_s == null ? "paused until resumed" : "paused, " + mins(s.paused_left_s) + " left";
   if (s.state === "IDLE") return s.profile === "off" ? "off: nothing runs" : "idle, watching the room";
   return "";

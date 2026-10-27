@@ -65,23 +65,26 @@ This is our own mold-proof, and it's easy to stop.
 ### day
 | Rule | Trigger | Phases | Cooldown |
 |---|---|---|---|
-| too hot | temp > 29 | cool, target 26, **30 min or until temp ≤ 26**; then fan 20 min | 30 min |
-| humid | humidity > 75 | dry, **60 min or until humidity ≤ 65**; then fan 20 min | 45 min |
+| too hot | temp > 29 | cool, target 26, **30 min or until temp ≤ 26**; then fan 20 min | 20 min |
+| humid | humidity > 75 | cool, target 26, **60 min or until humidity ≤ 65**; then fan 20 min | 30 min |
 
-First match wins, so a hot and humid room is cooled (cooling also dries).
-Dry mode removes moisture with less cooling and less power than cool mode.
+First match wins, so a hot and humid room is cooled first. Humid days are cooled too, not dried: in the M3 shadow
+run every dry cycle by day was overridden to cool by hand (see "Tuning" below). Dry mode stays in `night` and `away`.
 
 ### night
 | Rule | Trigger | Phases | Cooldown |
 |---|---|---|---|
-| warm | temp > 27 | cool, target 26, quiet fan, 45 min or until temp ≤ 26; then fan quiet 15 min | 30 min |
-| humid | humidity > 75 | dry, quiet fan, 45 min or until humidity ≤ 65; then fan quiet 15 min | 45 min |
+| warm | temp > 27 | cool, target 25, **20 min or until temp ≤ 25**; then fan 15 min | 30 min |
+| humid | humidity > 75 | dry, 45 min or until humidity ≤ 65; then fan 15 min | 45 min |
 
 ### away
 Nobody home: only prevent mold and damp, don't cool.
 | Rule | Trigger | Phases | Min. interval |
 |---|---|---|---|
 | damp | humidity > 80 | dry 30 min; then fan 20 min | 4 h between starts |
+
+Every phase of the default profiles uses fan speed 3: lower speeds leave the inside of the unit wet, higher ones are
+noisy, and `quiet` didn't cool enough at night. The fan is a per-phase setting, so a profile can use any speed.
 
 ### off
 Automation does nothing, not even the manual-hold takeover below. Kill switch.
@@ -147,7 +150,8 @@ If the AC is on and we didn't turn it on (for example, it was on when the Pico b
 
 **TAKEOVER.** If the hold is over and the AC is still on, the Pico ends the run the way a cycle ends:
 fan for `finish_fan_min` if the mode was cool or dry, then off, then `IDLE` (no cooldown). Not in the `off` profile and
-not while PAUSED. The hold also ends early on **Clear manual** or **Stop** (takeover with the fan phase) and on
+not while PAUSED. A run in fan mode is left alone when the hold ends: fan uses little power and dries the coil, so it
+runs until someone switches it off or changes the mode (a new change restarts the hold). The hold also ends early on **Clear manual** or **Stop** (takeover with the fan phase) and on
 **Stop now** (takeover straight to off). A change by the human during the takeover goes back to `MANUAL` with a new
 hold.
 
@@ -209,19 +213,20 @@ warning on the page.
          "when": {"match": "all", "conditions": [{"sensor": "temp", "op": ">", "value": 29}]},
          "confirm_reads": 2,
          "phases": [
-           {"mode": "cool", "target_c": 26, "fan": "auto", "max_min": 30,
+           {"mode": "cool", "target_c": 26, "fan": "3", "max_min": 30,
             "until": {"sensor": "temp", "op": "<=", "value": 26}},
            {"mode": "fan", "fan": "3", "max_min": 20, "until": null}
          ],
-         "cooldown_min": 30, "min_interval_min": 0},
+         "cooldown_min": 20, "min_interval_min": 0},
         {"name": "humid",
          "when": {"match": "all", "conditions": [{"sensor": "hum", "op": ">", "value": 75}]},
          "confirm_reads": 2,
          "phases": [
-           {"mode": "dry", "fan": "auto", "max_min": 60, "until": {"sensor": "hum", "op": "<=", "value": 65}},
+           {"mode": "cool", "target_c": 26, "fan": "3", "max_min": 60,
+            "until": {"sensor": "hum", "op": "<=", "value": 65}},
            {"mode": "fan", "fan": "3", "max_min": 20, "until": null}
          ],
-         "cooldown_min": 45, "min_interval_min": 0}
+         "cooldown_min": 30, "min_interval_min": 0}
       ]
     }
   }
@@ -401,6 +406,26 @@ counter it can't save shows as the config warning `boot: flash write failed, cou
   appended to a small rotating file on flash with the boot number, in every mode: ≤ 150 lines a day, so flash wear
   doesn't matter, and the History tab still has them after a reboot.
 
+## Tuning (M3)
+
+Shadow run 2026-10-20 to 2026-10-27 (7 nights, one boot): the Pico read the AC every minute and logged what it
+would have done, without writing. Every `would` was checked against the room history and the remote use.
+
+- Remote use was always seen as `manual`; triggers fired when the room really was hot or humid.
+- **Night `warm`**: on hot nights the room reached 27.5–29.5 °C and was cooled by hand, which brought it to 24–25 °C.
+  The default now cools to 25 °C in short runs (20 min at most) instead of 26 °C for up to 45 min, with the trigger
+  kept at 27 °C.
+- **Fan speed**: `quiet` didn't cool enough at night; all defaults now use fan 3 (see "Profiles").
+- **Day `humid`**: every dry cycle by day was switched to cool by hand within two hours, and one full dry cycle
+  at 28.5 °C / 85 % was followed by cooling a few minutes later. The default now cools.
+- **Day `too_hot`** at > 29 °C matched when people turn the AC on by hand (29–30 °C); kept. Day cooldowns are shorter
+  (20 min after `too_hot`, 30 after `humid`) so a room that warms up again is cooled sooner.
+- **Takeover of a fan run**: when a hold ended, the Pico would have switched off a fan left running by hand,
+  many times and mostly at night. A fan run is now left alone (see "TAKEOVER").
+- Event times are approximate when nobody is in the room: a trigger can fire with no one there to react.
+- Not changed: profiles are still chosen by hand (ADR 0004). Forgetting to switch profile in the morning happened;
+  a relative "night for 8 h, then day" timer is in "Later ideas" ("Profile timer").
+
 ## Later ideas (not in v1)
 
 Scheduled releases for these are in [roadmap.md](roadmap.md#after-v10).
@@ -412,7 +437,7 @@ Scheduled releases for these are in [roadmap.md](roadmap.md#after-v10).
   and **dew point / absolute humidity** triggers, which don't move just because the temperature changed.
 - **Presence**: ping/ARP the phone, or an LD2410 mmWave sensor (detects a person sitting or sleeping)
   → switch to away automatically, skip cooling an empty room.
-- **Profile timer**: "night for 8 h, then off" (relative, no clock needed).
+- **Profile timer**: "night for 8 h, then off" or "then day" (relative, no clock needed).
 - **Night sleep curve**: let the cool target rise slowly, e.g. +0.5 °C per hour.
 - **Energy**: decode the API's usage history, log kWh per cycle, compare profiles.
 - **Learn the room**: fit how fast the room warms up after the AC stops, predict when the trigger will be hit.
@@ -426,7 +451,6 @@ Scheduled releases for these are in [roadmap.md](roadmap.md#after-v10).
 
 - **Fan phase vs. humidity**: drying the coil with the fan blows the condensed water back into the room.
   Log humidity during the fan phase; if it jumps, make the fan phase shorter or slower.
-- Thresholds: is 26 °C a comfortable "done" temperature? Is 27 right for night?
 - Dry mode on this unit takes no target temperature, only a relative offset from 0 to −3.0 °C in 0.5 steps (more
   negative cools more; the owner uses −1.0). The API field is not mapped yet: change it on the remote and diff.
   v1 does not write it, so the AC keeps the remote's value.

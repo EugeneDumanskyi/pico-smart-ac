@@ -137,6 +137,12 @@ The ticks half-period (about 6.2 days on one boot) is not waited for here: the P
 home, so a boot rarely gets that far, and the unit, simulator and month tests cross the wrap. One boot past it on
 the board is left to M7's 14-day soak.
 
+**Result** (2026-10-27): done after 7 nights on one boot. Remote use was always `manual`, `writes` 0, no `blocked`.
+The review changed the defaults (night cools to 25 °C in short runs, day `humid` cools, fan 3 everywhere) and
+stopped the takeover of a fan run left on by hand: see the tuning note in [idea.md](idea.md#tuning-m3) and the soak in
+[firmware.md](firmware.md#tested-on-the-device). Carried to M7: free heap fell about 1.4 KB a day, slow but not
+flat; find the cause before or during the 14-day soak.
+
 M5 keeps the rest of the control API (`/api/action`, `/api/ac/test`) and the full Status tab.
 
 ## M4: Closed loop, supervised

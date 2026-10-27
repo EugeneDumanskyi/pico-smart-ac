@@ -6,7 +6,7 @@
   "start_ms": 0,
   "snapshot": null,
   "steps": [
-    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 25, "hum": 60, "actions": [{"action": "clear_manual"}], "expect": {"state": "IDLE", "cmds": [["event", "ignored"]]}},
+    {"t_s": 0, "ac": [false, "cool", 26, "3"], "temp": 25, "hum": 60, "actions": [{"action": "clear_manual"}], "expect": {"state": "IDLE", "cmds": [["event", "ignored"]]}},
     {"t_s": 60, "ac": [true, "cool", 24, "2"], "expect": {"state": "MANUAL", "cmds": [["event", "manual"], ["persist"]]}},
     {"t_s": 120, "actions": [{"action": "clear_manual"}], "expect": {"state": "TAKEOVER", "cmds": [["event", "takeover"], ["write", [true, "fan", null, "2"]], ["persist"]]}},
     {"t_s": 125, "readback": true, "ac": [true, "fan", null, "2"], "expect": {"cmds": [["persist"]]}},

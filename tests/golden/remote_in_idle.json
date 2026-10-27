@@ -6,7 +6,7 @@
   "start_ms": 0,
   "snapshot": null,
   "steps": [
-    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 25, "hum": 60, "expect": {"state": "IDLE"}},
+    {"t_s": 0, "ac": [false, "cool", 26, "3"], "temp": 25, "hum": 60, "expect": {"state": "IDLE"}},
     {"t_s": 60, "ac": [true, "cool", 24, "2"], "expect": {"state": "MANUAL", "cmds": [["event", "manual"], ["persist"]]}},
     {"t_s": 120, "to_s": 600, "expect": {"state": "MANUAL"}},
     {"t_s": 660, "ac": [false, "cool", 24, "2"], "expect": {"state": "MANUAL"}},

@@ -516,8 +516,27 @@ class TestTakeover(unittest.TestCase):
         rig, cmds = self.takeover(t.ACState(True, "dry", None, None))
         self.assertEqual(writes(cmds), [t.ACState(True, "fan", None, "auto")])
 
-    def test_fan_mode_stops_at_once(self):
+    def test_fan_run_is_left_alone(self):
         rig, cmds = self.takeover(FAN3)
+        self.assertEqual(cmds, [])
+        self.assertEqual(rig.polls(200), [])
+        self.assertEqual(rig.state, t.MANUAL)
+        self.assertIsNone(rig.status()["manual_left_s"])
+        rig.ac = t.ACState(False, "fan", None, "3")
+        rig.polls(30)
+        rig.poll()
+        self.assertEqual(rig.state, t.IDLE)
+
+    def test_fan_run_changed_to_cool_is_taken_over(self):
+        rig, cmds = self.takeover(FAN3)
+        rig.ac = HUMAN
+        rig.polls(10)
+        self.assertEqual(events(rig.poll()), [t.EV_TAKEOVER])
+        self.assertEqual(rig.state, t.TAKEOVER)
+
+    def test_clear_manual_stops_a_fan_run_at_once(self):
+        rig, cmds = self.takeover(FAN3)
+        cmds = rig.act(action="clear_manual")
         self.assertEqual(summary(cmds), [("event", t.EV_TAKEOVER), ("write", FAN3_OFF), ("persist",)])
         self.assertEqual(rig.state, t.STOPPING)
 

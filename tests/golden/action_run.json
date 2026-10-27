@@ -6,9 +6,9 @@
   "start_ms": 0,
   "snapshot": null,
   "steps": [
-    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 25, "hum": 60, "expect": {"state": "IDLE"}},
-    {"t_s": 60, "actions": [{"action": "run", "profile": "away", "rule": 0}], "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "dry", null, "auto"]], ["persist"]]}},
-    {"t_s": 65, "readback": true, "ac": [true, "dry", null, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 0, "ac": [false, "cool", 26, "3"], "temp": 25, "hum": 60, "expect": {"state": "IDLE"}},
+    {"t_s": 60, "actions": [{"action": "run", "profile": "away", "rule": 0}], "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "dry", null, "3"]], ["persist"]]}},
+    {"t_s": 65, "readback": true, "ac": [true, "dry", null, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 120, "actions": [{"action": "run", "profile": "day", "rule": 0}], "expect": {"state": "RUNNING", "cmds": [["event", "ignored"]]}},
     {"t_s": 180, "to_s": 1800, "expect": {"state": "RUNNING"}},
     {"t_s": 1860, "expect": {"state": "RUNNING", "cmds": [["event", "phase"], ["write", [true, "fan", null, "3"]], ["persist"]]}},
@@ -17,14 +17,14 @@
     {"t_s": 3060, "expect": {"state": "STOPPING", "cmds": [["write", [false, "fan", null, "3"]], ["persist"]]}},
     {"t_s": 3065, "readback": true, "ac": [false, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 3120, "expect": {"state": "IDLE", "cmds": [["event", "cycle_end"], ["persist"]]}},
-    {"t_s": 3180, "actions": [{"action": "run", "profile": "day", "rule": 0}], "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "auto"]], ["persist"]]}},
-    {"t_s": 3185, "readback": true, "ac": [true, "cool", 26, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 3180, "actions": [{"action": "run", "profile": "day", "rule": 0}], "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "3"]], ["persist"]]}},
+    {"t_s": 3185, "readback": true, "ac": [true, "cool", 26, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 3240, "expect": {"state": "RUNNING", "cmds": [["event", "phase"], ["write", [true, "fan", null, "3"]], ["persist"]]}},
     {"t_s": 3245, "readback": true, "ac": [true, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 3300, "to_s": 4380, "expect": {"state": "RUNNING"}},
     {"t_s": 4440, "expect": {"state": "STOPPING", "cmds": [["write", [false, "fan", null, "3"]], ["persist"]]}},
     {"t_s": 4445, "readback": true, "ac": [false, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 4500, "expect": {"state": "COOLDOWN", "cmds": [["event", "cycle_end"], ["persist"]]}},
-    {"t_s": 4560, "actions": [{"action": "run", "profile": "away", "rule": 0}], "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "dry", null, "auto"]], ["persist"]]}}
+    {"t_s": 4560, "actions": [{"action": "run", "profile": "away", "rule": 0}], "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "dry", null, "3"]], ["persist"]]}}
   ]
 }

@@ -40,15 +40,15 @@ class TestDefaultProfiles(unittest.TestCase):
                 (
                     "too_hot",
                     ("temp", ">", 29),
-                    [("cool", 26, "auto", 30, ("temp", "<=", 26)), ("fan", None, "3", 20, None)],
-                    30,
+                    [("cool", 26, "3", 30, ("temp", "<=", 26)), ("fan", None, "3", 20, None)],
+                    20,
                     0,
                 ),
                 (
                     "humid",
                     ("hum", ">", 75),
-                    [("dry", None, "auto", 60, ("hum", "<=", 65)), ("fan", None, "3", 20, None)],
-                    45,
+                    [("cool", 26, "3", 60, ("hum", "<=", 65)), ("fan", None, "3", 20, None)],
+                    30,
                     0,
                 ),
             ],
@@ -61,14 +61,14 @@ class TestDefaultProfiles(unittest.TestCase):
                 (
                     "warm",
                     ("temp", ">", 27),
-                    [("cool", 26, "quiet", 45, ("temp", "<=", 26)), ("fan", None, "quiet", 15, None)],
+                    [("cool", 25, "3", 20, ("temp", "<=", 25)), ("fan", None, "3", 15, None)],
                     30,
                     0,
                 ),
                 (
                     "humid",
                     ("hum", ">", 75),
-                    [("dry", None, "quiet", 45, ("hum", "<=", 65)), ("fan", None, "quiet", 15, None)],
+                    [("dry", None, "3", 45, ("hum", "<=", 65)), ("fan", None, "3", 15, None)],
                     45,
                     0,
                 ),
@@ -78,7 +78,7 @@ class TestDefaultProfiles(unittest.TestCase):
     def test_away(self):
         self.assertEqual(
             [summary(r) for r in rules_of("away")],
-            [("damp", ("hum", ">", 80), [("dry", None, "auto", 30, None), ("fan", None, "3", 20, None)], 0, 240)],
+            [("damp", ("hum", ">", 80), [("dry", None, "3", 30, None), ("fan", None, "3", 20, None)], 0, 240)],
         )
 
     def test_fresh_copy_each_call(self):

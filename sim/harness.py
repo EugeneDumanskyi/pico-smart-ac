@@ -47,6 +47,7 @@ from smartac.core.types import (  # noqa: E402
     EV_WRITE_FAILED,
     IDLE,
     MANUAL,
+    MODE_FAN,
     PAUSED,
     STOPPING,
 )
@@ -349,7 +350,8 @@ class Monitor:
                 self.counts["holds"] += 1
                 self._manual_reset(t, ac)
             elif poll:
-                if t - self.hold_from >= self.hold_ms:
+                # A fan run by hand is left alone after the hold.
+                if t - self.hold_from >= self.hold_ms and not (ac.power and ac.mode == MODE_FAN):
                     self.fail("MANUAL past the hold (%d min)" % ((t - self.hold_from) // MIN_MS))
                 if self.hold_over:
                     self.fail("MANUAL after stop/clear_manual")

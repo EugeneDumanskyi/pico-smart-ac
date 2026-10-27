@@ -6,9 +6,9 @@
   "start_ms": 0,
   "snapshot": null,
   "steps": [
-    {"t_s": 0, "ac": [false, "cool", 26, "auto"], "temp": 30, "hum": 70, "expect": {"state": "IDLE"}},
-    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "auto"]], ["persist"]]}},
-    {"t_s": 65, "readback": true, "ac": [true, "cool", 26, "auto"], "expect": {"cmds": [["persist"]]}},
+    {"t_s": 0, "ac": [false, "cool", 26, "3"], "temp": 30, "hum": 70, "expect": {"state": "IDLE"}},
+    {"t_s": 60, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["write", [true, "cool", 26, "3"]], ["persist"]]}},
+    {"t_s": 65, "readback": true, "ac": [true, "cool", 26, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 120, "temp": 29, "expect": {"state": "RUNNING"}, "configure": {
       "settings": {"dry_run": true, "hard_cap_min": 40},
       "profiles": {"version": 1, "active": "day", "profiles": {"day": {"label": "Day", "rules": [
@@ -23,15 +23,15 @@
     {"t_s": 3060, "expect": {"state": "STOPPING", "cmds": [["write", [false, "fan", null, "3"]], ["persist"]]}},
     {"t_s": 3065, "readback": true, "ac": [false, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 3120, "expect": {"state": "COOLDOWN", "cmds": [["event", "cycle_end"], ["persist"]]}},
-    {"t_s": 3180, "to_s": 4860, "temp": 30, "expect": {"state": "COOLDOWN"}},
-    {"t_s": 4920, "expect": {"state": "IDLE", "cmds": [["persist"]]}},
-    {"t_s": 4980, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["event", "would"], ["persist"]]}},
-    {"t_s": 5040, "to_s": 5520, "expect": {"state": "RUNNING"}},
-    {"t_s": 5580, "expect": {"state": "RUNNING", "cmds": [["event", "phase"], ["event", "would"], ["persist"]]}},
-    {"t_s": 5640, "to_s": 5820, "expect": {"state": "RUNNING"}},
-    {"t_s": 5880, "expect": {"state": "STOPPING", "cmds": [["event", "would"], ["persist"]]}},
-    {"t_s": 5940, "expect": {"state": "COOLDOWN", "cmds": [["event", "cycle_end"], ["persist"]]}},
-    {"t_s": 6000, "to_s": 6180, "temp": 27, "expect": {"state": "COOLDOWN"}},
-    {"t_s": 6240, "expect": {"state": "IDLE", "cmds": [["persist"]]}}
+    {"t_s": 2580, "to_s": 4260, "temp": 30, "expect": {"state": "COOLDOWN"}},
+    {"t_s": 4320, "expect": {"state": "IDLE", "cmds": [["persist"]]}},
+    {"t_s": 4380, "expect": {"state": "RUNNING", "cmds": [["event", "cycle_start"], ["event", "would"], ["persist"]]}},
+    {"t_s": 4440, "to_s": 4920, "expect": {"state": "RUNNING"}},
+    {"t_s": 4980, "expect": {"state": "RUNNING", "cmds": [["event", "phase"], ["event", "would"], ["persist"]]}},
+    {"t_s": 5040, "to_s": 5220, "expect": {"state": "RUNNING"}},
+    {"t_s": 5280, "expect": {"state": "STOPPING", "cmds": [["event", "would"], ["persist"]]}},
+    {"t_s": 5340, "expect": {"state": "COOLDOWN", "cmds": [["event", "cycle_end"], ["persist"]]}},
+    {"t_s": 5400, "to_s": 5580, "temp": 27, "expect": {"state": "COOLDOWN"}},
+    {"t_s": 5640, "expect": {"state": "IDLE", "cmds": [["persist"]]}}
   ]
 }

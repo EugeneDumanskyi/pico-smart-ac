@@ -84,6 +84,16 @@ M1 app on the device, 2026-10-17, deployed with `tools/deploy.py` (all `.mpy`, 2
 | Wi-Fi drop (router restart) | moved to M4, where the owner is present |
 | Day soak, 2026-10-17/18 | PASS: 20 h on one boot, no reset or crash, 0 Wi-Fi drops or reconnects, the AC reachable throughout, 0 writes. Free heap 340 576–340 592 bytes the whole time. Largest block 205–253 KB (no trend) while `tools/soak_log.py` polled `/api/state` every minute for 7.5 h (452 polls, none failed); back at 253 KB in every hourly `heap` line of the 12 h after polling stopped. RSSI -29 to -37 dBm. The long soak runs in M3. |
 
+M3 shadow run, 2026-10-20 to 2026-10-27, same board and firmware: the M3 build with `shadow=True`, the AC read
+every minute, no writes. Data from the daily `tools/shadow_pull.py` pulls.
+
+| Check | Result |
+|---|---|
+| Long soak | PASS: 161.8 h (6.7 days, 7 nights) on one boot, no reset or crash; the earlier boots of the run were deploys. 0 writes, 0 `blocked`, 0 `low_memory`. |
+| Heap | Free heap in the hourly `heap` lines fell slowly and steadily, 332 864 → 323 120 bytes (about 1.4 KB a day); lowest free 287 536. Largest block 46–239 KB, no trend. Not a risk at this rate (months to run out), but not flat either: to be found before or during the M7 14-day soak. |
+| AC reads | 9 715 reads, 16 read errors, all isolated single minutes; the AC was never reported unreachable. |
+| Wi-Fi | 1 drop, reconnected on its own; RSSI about -35 dBm. |
+
 ## Flashing
 
 1. Download the UF2 above and check it: `shasum -a 256 RPI_PICO2_W-20260824-v1.29.0.uf2`.

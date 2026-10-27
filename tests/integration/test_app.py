@@ -16,7 +16,7 @@ from smartac.shell.app import MAX_ACTIONS, SETTLE_MS, App
 from smartac.shell.store import MAX_EVENT_LINES, MemoryStore
 
 HOST = "127.0.0.1"
-DRY = t.ACState(True, t.MODE_DRY, None, t.FAN_AUTO)
+COOL = t.ACState(True, t.MODE_COOL, 260, "3")  # the day profile's first write here
 FAN3 = t.ACState(True, t.MODE_FAN, None, "3")
 MIN = 60 * 1000
 
@@ -95,13 +95,13 @@ class TestTick(unittest.TestCase):
         app = w.app()
         w.run(app, 70 * 1000)
         self.assertEqual([(s[0], s[1]) for s in w.steps], [(0, False), (60000, False), (60000 + SETTLE_MS, True)])
-        self.assertEqual(w.steps[1][3][1], (t.CMD_WRITE, DRY))
-        self.assertEqual(w.device.ac(), DRY)
+        self.assertEqual(w.steps[1][3][1], (t.CMD_WRITE, COOL))
+        self.assertEqual(w.device.ac(), COOL)
         ctl = app.controller
-        self.assertEqual((ctl.state, ctl.expected, ctl.written), (t.RUNNING, DRY, None))
+        self.assertEqual((ctl.state, ctl.expected, ctl.written), (t.RUNNING, COOL, None))
         s = app.status()
         self.assertEqual((s["reads"], s["writes"], s["write_errors"], s["device"]["uptime_s"]), (3, 1, 0, 70))
-        self.assertEqual(s["ac"], {"reachable": True, "power": True, "mode": "dry", "target_c": None, "fan": "auto"})
+        self.assertEqual(s["ac"], {"reachable": True, "power": True, "mode": "cool", "target_c": 26.0, "fan": "3"})
         self.assertEqual(s["state"], t.RUNNING)
 
     def test_rejected_write_is_counted_and_judged_by_the_read_back(self):
@@ -110,7 +110,7 @@ class TestTick(unittest.TestCase):
         app = w.app()
         w.run(app, 70 * 1000)
         self.assertEqual((app.writes, app.write_errors, app.last_write_error), (1, 1, "rsc 4000"))
-        self.assertEqual((app.controller.fails, app.controller.written), (1, DRY))
+        self.assertEqual((app.controller.fails, app.controller.written), (1, COOL))
 
     def test_action_wakes_the_control_task(self):
         w = World()
@@ -135,14 +135,14 @@ class TestStore(unittest.TestCase):
         stop_after_write(app, lambda state: seen.append(w.store.load("state")))
         w.run(app, 70 * 1000)
         self.assertEqual(seen[0]["state"], t.RUNNING)
-        self.assertEqual(seen[0]["written"], [True, "dry", None, "auto"])
+        self.assertEqual(seen[0]["written"], [True, "cool", 260, "3"])
 
     def test_reboot_after_the_write_finishes_the_cycle(self):
         w = World("day")
         app = w.app()
         stop_after_write(app)
         w.run(app, 70 * 1000)
-        self.assertEqual(w.device.ac(), DRY)  # the write landed, the read-back never came
+        self.assertEqual(w.device.ac(), COOL)  # the write landed, the read-back never came
         app = w.app()
         self.assertEqual(app.boot, 2)
         w.run(app, 30 * 60 * 1000)
@@ -315,7 +315,7 @@ class TestShadow(unittest.TestCase):
         lines = flash(w.store)
         would = [d for d in lines if d["kind"] == t.EV_WOULD]
         self.assertEqual(len(would), kinds.count(t.EV_WOULD))
-        self.assertEqual(would[0]["msg"], "would set dry, fan auto")
+        self.assertEqual(would[0]["msg"], "would set cool 26.0, fan 3")
         self.assertEqual((would[0]["temp"], would[0]["hum"]), (29.0, 80))
         self.assertTrue(any(d["kind"] == t.EV_CYCLE_START for d in lines))
         self.assertEqual(lines[0]["kind"], t.EV_BOOT)
@@ -338,7 +338,7 @@ class TestShadow(unittest.TestCase):
         stop_after_write(app)
         w.run(app, 70 * 1000)
         self.assertEqual((w.device.writes, w.store.load("state")["cycle"]["dry_run"]), (1, False))
-        w.device.remote(t.ACState(False, t.MODE_DRY, None, t.FAN_AUTO))  # the owner switched it off
+        w.device.remote(t.ACState(False, t.MODE_COOL, 260, "3"))  # the owner switched it off
         app = w.app(shadow=True)
         self.assertTrue(app.controller.cycle["dry_run"])
         w.steps = []
@@ -354,7 +354,7 @@ class TestShadow(unittest.TestCase):
         step = app._step
 
         def leaky(now, reading, actions, readback=False):
-            return step(now, reading, actions, readback) + [(t.CMD_WRITE, DRY)]
+            return step(now, reading, actions, readback) + [(t.CMD_WRITE, COOL)]
 
         app._step = leaky
         w.run(app, 61 * 1000)
@@ -412,9 +412,9 @@ class TestActions(unittest.TestCase):
         w = World("day")
         app = w.app()
         self.run_with(w, app, [(5 * MIN, {"action": "pause", "minutes": None, "cycle": "leave"})], 10 * MIN)
-        self.assertEqual((app.controller.state, w.device.ac()), (t.PAUSED, DRY))  # left running
+        self.assertEqual((app.controller.state, w.device.ac()), (t.PAUSED, COOL))  # left running
         self.assertEqual(app.writes, 1)
-        w.device.remote(t.ACState(False, t.MODE_DRY, None, t.FAN_AUTO))
+        w.device.remote(t.ACState(False, t.MODE_COOL, 260, "3"))
         self.run_with(w, app, [(11 * MIN, {"action": "resume"})], 14 * MIN)
         self.assertEqual((app.controller.state, w.kinds()[-2:]), (t.IDLE, [t.EV_PAUSE, t.EV_RESUME]))
 
@@ -463,7 +463,7 @@ class TestActions(unittest.TestCase):
         app = w.app()
         switch = {"action": "set_profile", "profile": "night", "cycle": "leave"}
         self.run_with(w, app, [(5 * MIN, switch)], 6 * MIN)
-        self.assertEqual((app.controller.state, app.controller.active, w.device.ac()), (t.MANUAL, "night", DRY))
+        self.assertEqual((app.controller.state, app.controller.active, w.device.ac()), (t.MANUAL, "night", COOL))
 
     def test_ac_test_during_a_write(self):
         # The test shares the client's lock: it waits for the write's exchange instead of racing it.
@@ -482,7 +482,7 @@ class TestActions(unittest.TestCase):
 
         app.client.write = racing
         w.run(app, 70 * 1000)
-        self.assertEqual((app.writes, app.write_errors, w.device.ac()), (1, 0, DRY))
+        self.assertEqual((app.writes, app.write_errors, w.device.ac()), (1, 0, COOL))
         self.assertEqual((replies[0]["reachable"], replies[0]["fw"]), (True, "3.6.0"))
 
     def test_ac_test_addresses(self):
