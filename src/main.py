@@ -3,8 +3,8 @@
 # - /maint exists: return to the REPL before anything starts. The watchdog can't be stopped once started, so this is
 #   how tools/deploy.py and the device tests get a quiet board.
 # - secrets.py missing: blink the LED fast, say so on the serial port, no Wi-Fi.
-# - Otherwise the app in shadow mode (M3): the controller decides on real readings and logs what it would do; nothing
-#   is written to the AC.
+# - Otherwise the app, writing to the AC. settings.json's dry_run still turns writes into events; shadow=True (M3)
+#   forces that on.
 import os
 
 
@@ -38,7 +38,7 @@ def main():
     tasks.run(
         board,
         store,
-        lambda: App(board, store, getattr(secrets, "DAIKIN_IP", None), shadow=True),
+        lambda: App(board, store, getattr(secrets, "DAIKIN_IP", None), shadow=False),
         token=getattr(secrets, "API_TOKEN", None),
     )
 
