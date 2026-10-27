@@ -366,9 +366,8 @@ class TestSettings(unittest.TestCase):
         s = config.default_settings()
         s["hard_cap_min"] = 50
         errors = config.validate_settings(s, profiles())[0]
-        self.assertEqual(paths(errors), ["hard_cap_min", "hard_cap_min"])  # the two humid rules (60 min); 50 fits
-        self.assertEqual(sorted(e["msg"] for e in errors),
-                         ["profiles.day.rules[1] needs 60 min", "profiles.night.rules[1] needs 60 min"])
+        self.assertEqual(paths(errors), ["hard_cap_min"])  # day humid (60 min); the rest fit in 50
+        self.assertEqual([e["msg"] for e in errors], ["profiles.day.rules[1] needs 60 min"])
 
 
 # --- idea.md's "Validation" table, row by row: one accepted and one rejected change each ---

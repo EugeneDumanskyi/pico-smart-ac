@@ -51,7 +51,7 @@ def default_profiles():
                             _phase("cool", "3", 30, _cond("temp", "<=", 26), target_c=26),
                             _phase("fan", "3", 20),
                         ],
-                        cooldown_min=20,
+                        cooldown_min=10,
                     ),
                     _rule(
                         "humid",
@@ -62,7 +62,7 @@ def default_profiles():
                             _phase("cool", "3", 40, [_cond("hum", "<=", 65), _cond("temp", "<=", 25)], target_c=26),
                             _phase("fan", "3", 20),
                         ],
-                        cooldown_min=30,
+                        cooldown_min=10,
                     ),
                 ],
             },
@@ -71,7 +71,7 @@ def default_profiles():
                 "rules": [
                     _rule(
                         "warm",
-                        _when(_cond("temp", ">", 27)),
+                        _when(_cond("temp", ">", 27.5)),
                         [
                             _phase("cool", "3", 20, _cond("temp", "<=", 25), target_c=25),
                             _phase("fan", "3", 15),
@@ -80,12 +80,12 @@ def default_profiles():
                     ),
                     _rule(
                         "humid",
-                        _when(_cond("hum", ">", 75)),
+                        _when(_cond("hum", ">", 88)),
                         [
-                            _phase("dry", "3", 45, _cond("hum", "<=", 65)),
+                            _phase("cool", "3", 25, _cond("hum", "<=", 70), target_c=25.5),
                             _phase("fan", "3", 15),
                         ],
-                        cooldown_min=45,
+                        cooldown_min=40,
                     ),
                 ],
             },
@@ -93,14 +93,14 @@ def default_profiles():
                 "label": "Away",
                 "rules": [
                     _rule(
-                        "damp",
-                        _when(_cond("hum", ">", 80)),
+                        # Moves some air while nobody is home for hours.
+                        "warm",
+                        _when(_cond("temp", ">", 28.5)),
                         [
-                            _phase("dry", "3", 30),
+                            _phase("cool", "3", 10, target_c=27),
                             _phase("fan", "3", 20),
                         ],
-                        cooldown_min=0,
-                        min_interval_min=240,
+                        cooldown_min=45,
                     ),
                 ],
             },

@@ -18,8 +18,8 @@
     {"t_s": 1860, "expect": {"state": "STOPPING", "cmds": [["write", [false, "fan", null, "3"]], ["persist"]]}},
     {"t_s": 1865, "readback": true, "ac": [false, "fan", null, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 1920, "expect": {"state": "COOLDOWN", "cmds": [["event", "cycle_end"], ["persist"]]}},
-    {"t_s": 1380, "to_s": 3060, "temp": 28, "expect": {"state": "COOLDOWN"}},
-    {"t_s": 3120, "expect": {"state": "IDLE", "cmds": [["persist"]]}},
-    {"t_s": 3180, "expect": {"state": "IDLE"}}
+    {"t_s": 1980, "to_s": 2460, "temp": 28, "expect": {"state": "COOLDOWN"}},
+    {"t_s": 2520, "expect": {"state": "IDLE", "cmds": [["persist"]]}},
+    {"t_s": 2580, "expect": {"state": "IDLE"}}
   ]
 }

@@ -65,23 +65,24 @@ This is our own mold-proof, and it's easy to stop.
 ### day
 | Rule | Trigger | Phases | Cooldown |
 |---|---|---|---|
-| too hot | temp > 29 | cool, target 26, **30 min or until temp ≤ 26**; then fan 20 min | 20 min |
-| humid | humidity > 75 | cool, target 26, **40 min or until humidity ≤ 65 or temp ≤ 25**; then fan 20 min | 30 min |
+| too hot | temp > 29 | cool, target 26, **30 min or until temp ≤ 26**; then fan 20 min | 10 min |
+| humid | humidity > 75 | cool, target 26, **40 min or until humidity ≤ 65 or temp ≤ 25**; then fan 20 min | 10 min |
 
 First match wins, so a hot and humid room is cooled first. Humid days are cooled too, not dried: in the M3 shadow
-run every dry cycle by day was overridden to cool by hand (see "Tuning" below). Dry mode stays in `night` and `away`.
+run every dry cycle by day was overridden to cool by hand (see "Tuning" below). No default uses dry mode any more;
+it stays available for any phase.
 
 ### night
 | Rule | Trigger | Phases | Cooldown |
 |---|---|---|---|
-| warm | temp > 27 | cool, target 25, **20 min or until temp ≤ 25**; then fan 15 min | 30 min |
-| humid | humidity > 75 | dry, 45 min or until humidity ≤ 65; then fan 15 min | 45 min |
+| warm | temp > 27.5 | cool, target 25, **20 min or until temp ≤ 25**; then fan 15 min | 30 min |
+| humid | humidity > 88 | cool, target 25.5, **25 min or until humidity ≤ 70**; then fan 15 min | 40 min |
 
 ### away
-Nobody home: only prevent mold and damp, don't cool.
-| Rule | Trigger | Phases | Min. interval |
+Nobody home for hours: now and then a short cool and a fan run move some air through a warm room.
+| Rule | Trigger | Phases | Cooldown |
 |---|---|---|---|
-| damp | humidity > 80 | dry 30 min; then fan 20 min | 4 h between starts |
+| warm | temp > 28.5 | cool, target 27, 10 min; then fan 20 min | 45 min |
 
 Every phase of the default profiles uses fan speed 3: lower speeds leave the inside of the unit wet, higher ones are
 noisy, and `quiet` didn't cool enough at night. The fan is a per-phase setting, so a profile can use any speed.
@@ -240,7 +241,7 @@ warning on the page.
 - `mode`: `cool`, `dry`, `fan` (`heat`, `auto` allowed by the AC but not offered in the UI).
 - `fan`: `auto`, `quiet`, `1`..`5`. `target_c`: only for `cool`, in 0.5 °C steps. Dry has no target temperature:
   the unit takes a relative offset (0 to −3.0 in 0.5 steps, set on the remote), which v1 leaves as the remote set it.
-- `min_interval_min`: minimum time between cycle starts of this rule (e.g. 240 for away).
+- `min_interval_min`: minimum time between cycle starts of this rule (e.g. 240: at most one start every 4 h).
 
 ### `settings.json`
 
@@ -314,7 +315,7 @@ The Pico sends ages and durations in seconds; the page turns them into clock tim
 - List of profiles; each expands to its rules; each rule to its trigger and phases.
 - Form fields with steppers, sized for the validation ranges above. Phase list with add / remove / reorder.
 - Plain-language summary under each rule, generated from the values:
-  "When temp > 29 for 2 readings: cool to 26 for up to 30 min (stop early at ≤ 26), then fan 20 min, then off. Wait 30 min."
+  "When temp > 29 for 2 readings: cool to 26 for up to 30 min (stop early at ≤ 26), then fan 20 min, then off. Wait 10 min."
 - **Save** sends the whole document; **Revert** reloads it; **Restore defaults** (with confirm).
 - Duplicate a profile, rename, delete (not the active one); copy a rule from another profile.
 
@@ -388,7 +389,7 @@ Config documents (`/api/profiles`, `/api/settings`):
   "dry_run": false,
   "poll_s": 60,
   "shadow": false,
-  "profiles": [{"name": "away", "label": "Away", "rules": ["damp"]},
+  "profiles": [{"name": "away", "label": "Away", "rules": ["warm"]},
                {"name": "day", "label": "Day", "rules": ["too_hot", "humid"]},
                {"name": "night", "label": "Night", "rules": ["warm", "humid"]}],
   "last_error": null,
@@ -426,6 +427,9 @@ would have done, without writing. Every `would` was checked against the room his
 - **Day `humid`, after the first live day** (2026-10-27): the cool phase reached 65 % and 26 °C together, but on a
   very humid day (say 95 %) humidity may not reach 65 % before the room is too cold. It now stops at 40 min or at
   25 °C, whichever comes first: `until` takes a second goal.
+- **After the first live days** (2026-10-27): day cooldowns are 10 min. Night `warm` starts at > 27.5 °C; night
+  `humid` starts at > 88 % and cools to 25.5 °C for up to 25 min or until 70 %, then waits 40 min. `away` no longer
+  dries every 4 h: above 28.5 °C it cools 10 min and runs the fan 20 min, then waits 45 min, to move some air.
 - Event times are approximate when nobody is in the room: a trigger can fire with no one there to react.
 - Not changed: profiles are still chosen by hand (ADR 0004). Forgetting to switch profile in the morning happened;
   a relative "night for 8 h, then day" timer is in "Later ideas" ("Profile timer").

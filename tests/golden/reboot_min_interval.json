@@ -1,6 +1,10 @@
 {
   "name": "reboot_min_interval",
-  "profiles": "default",
+  "profiles": {"version": 1, "active": "away", "profiles": {"away": {"label": "Away", "rules": [
+    {"name": "damp", "when": {"match": "all", "conditions": [{"sensor": "hum", "op": ">", "value": 80}]},
+     "confirm_reads": 2, "cooldown_min": 0, "min_interval_min": 240,
+     "phases": [{"mode": "dry", "fan": "3", "max_min": 30, "until": null},
+                {"mode": "fan", "fan": "3", "max_min": 20, "until": null}]}]}}},
   "active": "away",
   "settings": {},
   "start_ms": 0,

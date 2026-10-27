@@ -40,14 +40,14 @@ class TestDefaultProfiles(unittest.TestCase):
                     "too_hot",
                     ("temp", ">", 29),
                     [("cool", 26, "3", 30, [("temp", "<=", 26)]), ("fan", None, "3", 20, [])],
-                    20,
+                    10,
                     0,
                 ),
                 (
                     "humid",
                     ("hum", ">", 75),
                     [("cool", 26, "3", 40, [("hum", "<=", 65), ("temp", "<=", 25)]), ("fan", None, "3", 20, [])],
-                    30,
+                    10,
                     0,
                 ),
             ],
@@ -59,16 +59,16 @@ class TestDefaultProfiles(unittest.TestCase):
             [
                 (
                     "warm",
-                    ("temp", ">", 27),
+                    ("temp", ">", 27.5),
                     [("cool", 25, "3", 20, [("temp", "<=", 25)]), ("fan", None, "3", 15, [])],
                     30,
                     0,
                 ),
                 (
                     "humid",
-                    ("hum", ">", 75),
-                    [("dry", None, "3", 45, [("hum", "<=", 65)]), ("fan", None, "3", 15, [])],
-                    45,
+                    ("hum", ">", 88),
+                    [("cool", 25.5, "3", 25, [("hum", "<=", 70)]), ("fan", None, "3", 15, [])],
+                    40,
                     0,
                 ),
             ],
@@ -77,7 +77,7 @@ class TestDefaultProfiles(unittest.TestCase):
     def test_away(self):
         self.assertEqual(
             [summary(r) for r in rules_of("away")],
-            [("damp", ("hum", ">", 80), [("dry", None, "3", 30, []), ("fan", None, "3", 20, [])], 0, 240)],
+            [("warm", ("temp", ">", 28.5), [("cool", 27, "3", 10, []), ("fan", None, "3", 20, [])], 45, 0)],
         )
 
     def test_fresh_copy_each_call(self):
