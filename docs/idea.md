@@ -111,6 +111,13 @@ Nobody home for hours: now and then a short cool and a fan run move some air thr
 |---|---|---|---|
 | warm | temp > 28.5 | cool, target 27, 10 min; then fan 20 min | 45 min |
 
+### turbo
+A quick cool-down on demand: start it with **Run now** while Day or Night is active, and that profile's rules carry
+on after the cycle. Its trigger is low so that it always matches; as the active profile it would run back to back.
+| Rule | Trigger | Phases | Cooldown |
+|---|---|---|---|
+| turbo | temp > 22 | cool, target 22, **35 min or until temp ≤ 21**; then fan 15 min | 5 min |
+
 Every phase of the default profiles uses fan speed 3: lower speeds leave the inside of the unit wet, higher ones are
 noisy, and `quiet` didn't cool enough at night. The fan is a per-phase setting, so a profile can use any speed.
 

@@ -261,7 +261,7 @@
     }
 
     async reset() {
-      if (!confirm("Replace all profiles with the defaults (Day and Night schedules with their stages, Away)?")) return;
+      if (!confirm("Replace all profiles with the defaults (Day and Night schedules with their stages, Away, Turbo)?")) return;
       try {
         const r = await api("POST", this.resetUrl);
         if (r.status !== 200) {

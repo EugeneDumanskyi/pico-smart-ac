@@ -145,6 +145,22 @@ def default_profiles():
                     ),
                 ],
             },
+            # A quick cool-down on demand: Run now starts it from Day or Night, which carry on after it. Its trigger
+            # is low so that it always matches; made the active profile, it would run back to back.
+            "turbo": {
+                "label": "Turbo",
+                "rules": [
+                    _rule(
+                        "turbo",
+                        _when(_cond("temp", ">", 22)),
+                        [
+                            _phase("cool", "3", 35, _cond("temp", "<=", 21), target_c=22),
+                            _phase("fan", "3", 15),
+                        ],
+                        cooldown_min=5,
+                    ),
+                ],
+            },
         },
     }
 

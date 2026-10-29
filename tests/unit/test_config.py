@@ -36,7 +36,8 @@ class TestDefaultProfiles(unittest.TestCase):
         self.assertEqual(
             sorted(doc["profiles"]),
             ["away", "day", "day_afternoon", "day_early_morning", "day_evening", "day_hot_afternoon", "day_morning",
-             "night", "night_early_morning", "night_early_night", "night_evening", "night_midnight", "night_morning"],
+             "night", "night_early_morning", "night_early_night", "night_evening", "night_midnight", "night_morning",
+             "turbo"],
         )
         self.assertFalse(config.OFF in doc["profiles"])
         self.assertEqual(config.validate_profiles(doc), ([], []))
@@ -132,6 +133,13 @@ class TestDefaultProfiles(unittest.TestCase):
         self.assertEqual(
             [summary(r) for r in rules_of("away")],
             [("warm", ("temp", ">", 28.5), [("cool", 27, "3", 10, []), ("fan", None, "3", 20, [])], 45, 0)],
+        )
+
+    def test_turbo(self):
+        self.assertEqual(
+            [summary(r) for r in rules_of("turbo")],
+            [("turbo", ("temp", ">", 22), [("cool", 22, "3", 35, [("temp", "<=", 21)]), ("fan", None, "3", 15, [])],
+              5, 0)],
         )
 
     def test_fresh_copy_each_call(self):
