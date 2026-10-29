@@ -94,6 +94,14 @@ every minute, no writes. Data from the daily `tools/shadow_pull.py` pulls.
 | AC reads | 9 715 reads, 16 read errors, all isolated single minutes; the AC was never reported unreachable. |
 | Wi-Fi | 1 drop, reconnected on its own; RSSI about -35 dBm. |
 
+M7 device checks, 2026-10-29, same board and firmware, live build (writes on), Day/Night time stages.
+
+| Check | Result |
+|---|---|
+| Heap after profile edits, before the fix | An evening of profile saves (10 on one boot) fragmented the heap: the largest block in the hourly `heap` lines fell to 28 736 bytes, and the 60 s check went under `LOW_BLOCK` (24 KB) and logged `low_memory` (RAM only then; it goes to flash now). Free heap stayed near 298 KB: room enough, but in small pieces. |
+| Heap after profile edits, after the fix | `gc.collect()` after each request, `json.dump` streamed to the file, `json.loads` on the body's bytes. 8 profile saves in 13 min: largest block 132 544–132 752 bytes, free 266 576 at the lowest, 0 `low_memory`. |
+| Heap while serving the History tab | 75 rounds of `/api/history` (43 KB, 0.55 s) and `/api/log?tail=300` (32 KB, 0.50 s) from the Mac, back to back, with `/api/state` in between: all 200, free heap 265 872–266 560, largest block 80–82 KB, 0 `low_memory`. The largest block had fallen from 132 KB to 82 KB over the first 2.4 h of the boot before the test, not during it; to watch in the soak. |
+
 ## Flashing
 
 1. Download the UF2 above and check it: `shasum -a 256 RPI_PICO2_W-20260824-v1.29.0.uf2`.

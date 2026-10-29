@@ -242,16 +242,17 @@ tab stacks its panels with a 3 h / 12 h / 24 h toggle; the chart stays this boot
 placed in time, ADR 0004), and the event list groups earlier boots by uptime; the Pico's address comes from the
 router's list, or from a `wifi up <ip>` line on the USB serial that `deploy.py` waits for.
 Done so far (2026-10-21): a full flash no longer resets the board (the log line is dropped and counted in
-`device.log_errors`; boot counters it can't save stay in RAM with a config warning); `GET /api/log?tail=N` (a backward
+`device.log_errors`; boot counters it can't save stay in RAM with a config warning; a snapshot it can't save is
+tried again each tick, the AC write still goes out, and a warning shows until a save works); `GET /api/log?tail=N` (a backward
 scan, constant memory, across the rotation); the History tab (`web/history.js`, 4.0 KB gzipped, the page 20.6 KB of
 the 60 KB budget), checked in headless Chrome at 390 px, light and dark, against `make dev DEV_LIVE=1 DEV_SPEED=600`:
 the three windows, real fake-AC cycles in the lines, band and markers, the cursor, an unreachable spell (hatched),
 `poll_s` 120 bridged, and a restart grouping the earlier boot; `deploy.py` waits for the address (checked on a pty);
 [install.md](install.md), the README's setup and the docs. `main.py` keeps shadow mode until M4's Pico half.
 
-Left, in the Pico session after M3's review: deploy; the `wifi up` line and `deploy.py`'s wait on the board; heap
-while `/api/history` and `/api/log?tail=300` are served; the History tab on the phone; `firmware.md`'s device rows.
-Then the 14-day soak, a fresh install from the README, and the tag.
+Done on the board (2026-10-29): deployed; heap while `/api/history` and `/api/log?tail=300` are served, and after
+profile edits (a fragmentation fix), in `firmware.md`'s device rows. Left: the `wifi up` line and `deploy.py`'s wait
+on the board, the History tab checked on the phone. Then the 14-day soak, a fresh install from the README, and the tag.
 
 ## After v1.0
 

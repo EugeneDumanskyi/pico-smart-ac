@@ -255,6 +255,31 @@ class TestStore(unittest.TestCase):
         self.assertEqual((w.store.events, app.status()["device"]["log_errors"]), ([], refused))
         self.assertEqual(w.app().boot, 1)  # still unsaved: the next boot counts from the same value
 
+    def test_full_flash_still_writes_the_ac(self):
+        # The snapshot and the active profile can't be saved: the cycle still runs, and a later save clears it.
+        w = World("day_morning")
+        app = w.app()
+        save = w.store.save
+        refuse = [True]
+
+        def full(name, doc):
+            if refuse[0] and name in ("state", "profiles"):
+                raise OSError(28)
+            save(name, doc)
+
+        w.store.save = full
+        w.run(app, 70 * 1000)
+        self.assertEqual((app.controller.state, w.device.writes), (t.RUNNING, 1))
+        self.assertEqual(app.status()["config_warning"], "state: flash write failed, state not saved")
+        self.assertIsNone(w.store.load("state"))
+        app.action({"action": t.ACT_SET_PROFILE, "profile": "night_evening", "cycle": "leave"})
+        w.run(app, 140 * 1000)
+        self.assertEqual((app.controller.active, app.active), ("night_evening", "day_morning"))
+        refuse[0] = False
+        w.run(app, 210 * 1000)
+        self.assertEqual((app.active, w.store.load("profiles")["active"]), ("night_evening", "night_evening"))
+        self.assertEqual((w.store.load("state")["profile"], app.status()["warnings"]), ("night_evening", []))
+
 
 class TestObserve(unittest.TestCase):
     def test_reads_and_records_but_never_writes(self):

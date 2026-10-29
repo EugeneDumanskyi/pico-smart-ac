@@ -115,6 +115,7 @@ class App:
         self.writes = 0
         self.write_errors = 0
         self.last_write_error = None
+        self.unsaved = None  # a snapshot the flash refused (full)
         self._event(now, EV_BOOT, "boot %d (%s)" % (self.boot, self.reset_cause))
 
     def _count(self, count):
@@ -449,24 +450,39 @@ class App:
         # Events and the snapshot reach the store before the write goes out (ADR 0003): a reset in between
         # finds `written` in state.json. -> the state to write, or None.
         write = None
+        snap = self.unsaved  # one the flash refused: tried again each tick until a newer one replaces it
         for kind, payload in cmds:
             if kind == CMD_EVENT:
                 self._event(now, payload[0], payload[1])
             elif kind == CMD_PERSIST:
-                self._persist(payload)
+                snap = payload
             elif kind == CMD_WRITE:
                 write = payload
+        if snap is not None:
+            self._persist(snap)
         return write
 
     def _persist(self, snap):
-        self.store.save("state", snap)
-        if snap["profile"] != self.active:
-            # The active profile lives in profiles.json; the snapshot only mirrors it. A saved document the next
-            # tick applies is the one on flash, so it is the one to update.
-            profiles = dict(self.pending.get("profiles") or self.controller.profiles)
-            profiles["active"] = snap["profile"]
-            self.store.save("profiles", profiles)
-            self.active = snap["profile"]
+        # A snapshot the flash refuses (full) doesn't stop the tick: its write still goes out, or a lost "off" would
+        # leave the AC running. A reset before the next good save boots from the older snapshot and finds the AC
+        # not as it expects: a hold, then a takeover (ADR 0003). _apply tries it again each tick; the warning stays
+        # until a save works.
+        try:
+            self.store.save("state", snap)
+            if snap["profile"] != self.active:
+                # The active profile lives in profiles.json; the snapshot only mirrors it. A saved document the next
+                # tick applies is the one on flash, so it is the one to update.
+                profiles = dict(self.pending.get("profiles") or self.controller.profiles)
+                profiles["active"] = snap["profile"]
+                self.store.save("profiles", profiles)
+                self.active = snap["profile"]  # left as it was on a failure: the next persist tries again
+        except OSError:
+            self.unsaved = snap
+            if not any(w["path"] == "state" for w in self.warnings):
+                self.warnings.append({"path": "state", "msg": "flash write failed, state not saved"})
+            return
+        self.unsaved = None
+        self.warnings = [w for w in self.warnings if w["path"] != "state"]
 
     def _clock(self, now):
         s = self.clock.status(now)
