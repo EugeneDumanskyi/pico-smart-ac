@@ -1,7 +1,7 @@
 {
   "name": "reboot_mid_cycle",
   "profiles": "default",
-  "active": "day",
+  "active": "day_morning",
   "settings": {},
   "start_ms": 0,
   "snapshot": null,

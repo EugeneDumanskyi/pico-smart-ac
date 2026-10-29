@@ -135,6 +135,21 @@ class TestDecode(unittest.TestCase):
         self.assertTrue(r.reachable)
         self.assertIsNone(r.outdoor_temp)
 
+    def test_last_operation(self):
+        # last_ope sits next to e_1002 in the indoor reply; time is local with a "Z".
+        def last(*children):
+            resp = response(indoor_root())
+            resp["responses"][0]["pc"]["pch"].insert(0, node("last_ope", *children))
+            return codec.decode(resp).last_op
+
+        self.assertIsNone(codec.decode(response(indoor_root())).last_op)
+        self.assertEqual(last(leaf("type", 100), leaf("time", "2026-10-28T08:49:01Z"), leaf("chg_flg", 0)),
+                         ("2026-10-28T08:49:01Z", 100))
+        self.assertEqual(last(leaf("time", "2026-10-28T08:49:01Z")), ("2026-10-28T08:49:01Z", None))
+        self.assertEqual(last(leaf("type", "x"), leaf("time", "x" * 40)), ("x" * 24, None))
+        self.assertIsNone(last(leaf("type", 100), leaf("time", 5)))
+        self.assertIsNone(last(leaf("type", 100)))
+
 
 class TestDecodeUnreachable(unittest.TestCase):
     def assertUnreachable(self, resp):

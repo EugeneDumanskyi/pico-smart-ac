@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# The state machine (docs/idea.md, "State machine"; ownership: ADR 0003; time: ADR 0004).
-# step(now, reading, actions) -> [(CMD_WRITE | CMD_PERSIST | CMD_EVENT, payload)]. Pure: the shell does the
-# reads, writes and files; time is passed in as monotonic ms and only compared through ticks_since.
+# The state machine (docs/idea.md, "State machine"; ownership: ADR 0003; time: ADR 0004, 0006).
+# step(now, reading, actions, minute) -> [(CMD_WRITE | CMD_PERSIST | CMD_EVENT, payload)]. Pure: the shell does
+# the reads, writes and files; time is passed in as monotonic ms and only compared through ticks_since. minute
+# (of the day, None while unknown) only picks a schedule's stage.
 #
 # One step: prune the selector -> reachability and miss count -> ownership check (may go MANUAL) -> actions ->
-# timers, goals and selection -> at most one write -> persist if the snapshot changed.
+# the stage -> timers, goals and selection -> at most one write -> persist if the snapshot changed.
 # A read-back step (readback=True, ~5 s after a write) only confirms the write or counts a failed attempt.
 import json
 
-from smartac.core.config import OFF
+from smartac.core.config import OFF, stage_at
 from smartac.core.rules import RuleSelector, goal_hit
 from smartac.core.types import (
     ACT_CLEAR_MANUAL,
@@ -31,6 +32,7 @@ from smartac.core.types import (
     EV_PHASE,
     EV_PROFILE,
     EV_RESUME,
+    EV_STAGE,
     EV_TAKEOVER,
     EV_UNREACHABLE,
     EV_WOULD,
@@ -146,6 +148,10 @@ class Controller:
         self.settings = settings
         self.active = profiles.get("active", OFF)
         self.selector = RuleSelector()
+        # A schedule's current stage as (index, its profile's name), None for a rules profile or until the first
+        # step picks one; unknown: the time was unknown, so it is the default stage. Not persisted.
+        self.stage = None
+        self.unknown = False
         self.state = IDLE
         # The cycle we run (RUNNING, TAKEOVER, STOPPING) or whose cooldown runs (COOLDOWN). Keys: CYCLE_KEYS.
         # "rule" is a copy taken at the start; it is replaced, never changed in place (snapshots share it).
@@ -186,7 +192,7 @@ class Controller:
         if settings is not None:
             self.settings = settings
 
-    def step(self, now, reading, actions=(), readback=False):
+    def step(self, now, reading, actions=(), readback=False, minute=None):
         out = []
         self.selector.prune(now)
         ac = reading.ac
@@ -220,6 +226,7 @@ class Controller:
         self.queued = []
         for action in actions:
             self._act(now, reading, action, out)
+        self._pick_stage(minute, out)
         self._advance(now, reading, out)
         if ac is not None and self.state in OWNED:
             self._write(now, out)
@@ -232,6 +239,7 @@ class Controller:
         s = {
             "state": st,
             "profile": self.active,
+            "stage": None,
             "cycle": None,
             "cooldown_left_s": None,
             "manual_left_s": None,
@@ -240,6 +248,17 @@ class Controller:
             "misses": self.misses,
             "booting": self.booting,
         }
+        i = None if self.stage is None else self.stage[0]
+        stages = self._stages()
+        if i is not None and stages is not None and i < len(stages):  # a saved edit is picked up on the next step
+            s["stage"] = {
+                "n": i + 1,
+                "of": len(stages),
+                "from": stages[i]["from"],
+                "profile": self.stage[1],
+                "default": stages[i].get("default", False),
+                "time_unknown": self.unknown,
+            }
         if self.booting:
             return s  # no timers run until the first reachable read
         c = self.cycle
@@ -637,7 +656,7 @@ class Controller:
         i = action.get("rule")
         if not isinstance(rules, list) or not _is_int(i) or not 0 <= i < len(rules):
             return False
-        if name == self.active:
+        if name == self._rules_name():
             self.selector.started(rules[i], now)
         self._start(now, rules[i], ac, out)
         return True
@@ -681,6 +700,7 @@ class Controller:
             return False
         self.active = name
         self.selector = RuleSelector()
+        self.stage = None
         self._event(out, EV_PROFILE, "profile " + name)
         st = self.state
         if st in CYCLING and choice == LEAVE:
@@ -693,10 +713,42 @@ class Controller:
             self._idle()
         return True
 
+    # --- stages ---
+
+    def _pick_stage(self, minute, out):
+        # A schedule runs the rules of the stage for this minute of the day, the default stage while the time is
+        # unknown (ADR 0006). A new stage only restarts the trigger counts: a running cycle or cooldown carries on,
+        # and min_interval holds for a rule of the same name.
+        stages = self._stages()
+        if stages is None:
+            self.stage = None
+            return
+        i = stage_at(stages, minute)
+        stage = (i, stages[i]["profile"])
+        self.unknown = minute is None
+        if stage == self.stage:
+            return
+        if self.stage is None or stage[1] != self.stage[1]:
+            self.selector.reset()
+        self.stage = stage
+        if self.unknown:
+            why = "default, time unknown"
+        else:
+            why = "from " + stages[i]["from"]
+        self._event(out, EV_STAGE, "%d/%d %s (%s)" % (i + 1, len(stages), stage[1], why))
+
+    def _stages(self):
+        profile = self.profiles.get("profiles", {}).get(self.active)
+        return profile.get("stages") if isinstance(profile, dict) else None
+
     # --- helpers ---
 
+    def _rules_name(self):
+        # The profile whose rules run: the active one, or the current stage's for a schedule.
+        return self.active if self.stage is None else self.stage[1]
+
     def _rules(self):
-        profile = self.profiles.get("profiles", {}).get(self.active)
+        profile = self.profiles.get("profiles", {}).get(self._rules_name())
         return profile.get("rules", []) if isinstance(profile, dict) else []
 
     def _event(self, out, kind, msg):

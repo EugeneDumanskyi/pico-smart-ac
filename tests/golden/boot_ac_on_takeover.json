@@ -1,10 +1,10 @@
 {
   "name": "boot_ac_on_takeover",
   "profiles": "default",
-  "active": "day",
+  "active": "day_morning",
   "settings": {"manual_hold_min": 10, "finish_fan_min": 10},
   "start_ms": 0,
-  "snapshot": {"v": 1, "state": "IDLE", "profile": "day", "cycle": null, "expected": null, "written": null, "pause": null},
+  "snapshot": {"v": 1, "state": "IDLE", "profile": "day_morning", "cycle": null, "expected": null, "written": null, "pause": null},
   "steps": [
     {"t_s": 0, "ac": null, "temp": 25, "hum": 60, "expect": {"state": "IDLE"}},
     {"t_s": 60, "ac": [true, "dry", null, "auto"], "expect": {"state": "MANUAL", "cmds": [["event", "manual"], ["persist"]]}},

@@ -230,9 +230,10 @@ class TestAction(unittest.TestCase):
             ({"action": "pause", "cycle": "later"}, "cycle must be finish or leave"),
             ({"action": "run", "profile": "nope", "rule": 0}, "unknown profile"),
             ({"action": "run", "profile": "off", "rule": 0}, "unknown profile"),
-            ({"action": "run", "profile": "day", "rule": 2}, "rule must be an index in the profile"),
-            ({"action": "run", "profile": "day", "rule": -1}, "rule must be an index in the profile"),
-            ({"action": "run", "profile": "day"}, "rule must be an index in the profile"),
+            ({"action": "run", "profile": "day_morning", "rule": 2}, "rule must be an index in the profile"),
+            ({"action": "run", "profile": "day_morning", "rule": -1}, "rule must be an index in the profile"),
+            ({"action": "run", "profile": "day_morning"}, "rule must be an index in the profile"),
+            ({"action": "run", "profile": "day", "rule": 0}, "rule must be an index in the profile"),  # a schedule
         ]
         replies = exchange(*[act(**b) for b, _ in bad], post("/api/action", b"[1]", TOKEN), shadow=True, token=TOKEN)
         self.assertEqual([r[0] for r in replies], [400] * (len(bad) + 1))
@@ -248,12 +249,12 @@ class TestAction(unittest.TestCase):
             self.assertEqual(app.queue, [
                 {"action": "pause", "minutes": 60, "cycle": "leave"},
                 {"action": "pause", "minutes": None},
-                {"action": "run", "profile": "night", "rule": 1},
+                {"action": "run", "profile": "night_evening", "rule": 1},
                 {"action": "resume"}, {"action": "stop"}, {"action": "stop_now"}, {"action": "clear_manual"},
             ])
 
         replies = exchange(act(action="pause", minutes=60, cycle="leave", extra=1), act(action="pause", minutes=None),
-                           act(action="run", profile="night", rule=1), act(action="resume"), act(action="stop"),
+                           act(action="run", profile="night_evening", rule=1), act(action="resume"), act(action="stop"),
                            act(action="stop_now"), act(action="clear_manual"), shadow=True, token=TOKEN,
                            after=queued)
         self.assertEqual([r[0] for r in replies], [202] * 7)
@@ -263,6 +264,32 @@ class TestAction(unittest.TestCase):
         replies = exchange(*[act(action="stop") for _ in range(MAX_ACTIONS + 1)], shadow=True, token=TOKEN)
         self.assertEqual([r[0] for r in replies], [202] * MAX_ACTIONS + [503])
         self.assertEqual(json.loads(replies[-1][1]), {"error": "busy, try again"})
+
+
+def phone(time, token=TOKEN):
+    return post("/api/clock", {"time": time}, token)
+
+
+class TestClock(unittest.TestCase):
+    def test_phone_sets_the_clock_until_the_ac_does(self):
+        seen = []
+
+        async def after(app):
+            seen.append(app.status()["clock"])
+            seen.extend(r["msg"] for r in app.events.export(app._now()) if r["kind"] == t.EV_CLOCK)
+
+        replies = exchange(phone("2026-10-28T21:15:00Z"), phone("2026-10-28T21:25:00Z"), token=TOKEN, after=after)
+        self.assertEqual([r[0] for r in replies], [200, 200])
+        self.assertEqual(json.loads(replies[0][1]), {"time": "21:15", "source": "phone", "phone_s": None})
+        self.assertEqual(json.loads(replies[1][1]), {"time": "21:25", "source": "phone", "phone_s": 600})
+        self.assertEqual(seen, [{"time": "21:25", "source": "phone", "phone_s": 600},
+                                "phone time 21:25:00 (clock was -10 min)", "phone time 21:15:00 (clock set)"])
+
+    def test_refused(self):
+        replies = exchange(phone("21:15"), phone("2020-10-28T21:15:00Z"), phone(None),
+                           phone("2026-10-28T21:15:00Z", "x"), post("/api/clock", b"[1]", TOKEN), token=TOKEN)
+        self.assertEqual([r[0] for r in replies], [400, 400, 400, 401, 400])
+        self.assertEqual(json.loads(replies[0][1]), {"error": "time must be YYYY-MM-DDTHH:MM:SSZ, local, from 2024 on"})
 
 
 def ac_test(body, token=TOKEN):
@@ -420,8 +447,8 @@ class TestConfigRoutes(unittest.TestCase):
 
     def test_errors_carry_paths(self):
         doc = config.default_profiles()
-        doc["profiles"]["day"]["rules"][0]["phases"][0]["target_c"] = 31
-        doc["profiles"]["night"]["rules"][1]["confirm_reads"] = 0
+        doc["profiles"]["day_morning"]["rules"][0]["phases"][0]["target_c"] = 31
+        doc["profiles"]["night_evening"]["rules"][1]["confirm_reads"] = 0
         store = MemoryStore()
         replies = exchange(put("/api/profiles", doc, TOKEN), put("/api/profiles", b"{nope", TOKEN),
                            put("/api/profiles", b"\xff\xfe", TOKEN), shadow=True, token=TOKEN, store=store)
@@ -429,13 +456,14 @@ class TestConfigRoutes(unittest.TestCase):
         body = json.loads(replies[0][1])
         self.assertEqual(body["ok"], False)
         self.assertEqual(sorted(e["path"] for e in body["errors"]),
-                         ["profiles.day.rules[0].phases[0].target_c", "profiles.night.rules[1].confirm_reads"])
+                         ["profiles.day_morning.rules[0].phases[0].target_c",
+                          "profiles.night_evening.rules[1].confirm_reads"])
         self.assertEqual(json.loads(replies[1][1])["errors"], [{"path": "$", "msg": "body must be a JSON document"}])
         self.assertIsNone(store.load("profiles"))
 
     def test_validate_does_not_save(self):
         doc = config.default_profiles()
-        doc["profiles"]["day"]["rules"][0]["phases"].pop()
+        doc["profiles"]["day_morning"]["rules"][0]["phases"].pop()
         store = MemoryStore()
 
         async def nothing_pending(app):
@@ -444,7 +472,7 @@ class TestConfigRoutes(unittest.TestCase):
         [(status, body)] = exchange(post("/api/profiles/validate", doc, TOKEN), shadow=True, token=TOKEN, store=store,
                                     after=nothing_pending)
         self.assertEqual(status, 200)
-        self.assertEqual([w["path"] for w in json.loads(body)["warnings"]], ["profiles.day.rules[0].phases"])
+        self.assertEqual([w["path"] for w in json.loads(body)["warnings"]], ["profiles.day_morning.rules[0].phases"])
         self.assertIsNone(store.load("profiles"))
 
     def test_active_comes_from_the_controller(self):

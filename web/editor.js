@@ -14,7 +14,7 @@
     poll_s: [30, 300, 10], hard_cap_min: [30, 480, 10], manual_hold_min: [10, 480, 10],
     manual_release_off_min: [5, 240, 5], finish_fan_min: [0, 60, 5], limit_temp: [0, 60, 1], limit_hum: [0, 100, 1],
   };
-  const MAX = { profiles: 10, rules: 8, conditions: 4, phases: 5, goals: 2 };
+  const MAX = { profiles: 20, rules: 8, conditions: 4, phases: 5, goals: 2, stages: 8 };
   const MODES = ["cool", "dry", "fan"];
   const FANS = ["auto", "quiet", "1", "2", "3", "4", "5"];
   const SENSORS = [["temp", "temp"], ["hum", "humidity"], ["outdoor_temp", "outdoor"]];
@@ -144,6 +144,12 @@
       link.textContent = this.tab + (dirty ? " •" : "");
       for (const el of this.root.querySelectorAll("[data-sum]")) el.textContent = summary(at(this.draft, el.dataset.sum));
       for (const el of this.root.querySelectorAll("[data-text]")) el.textContent = at(this.draft, el.dataset.text) || "";
+      for (const el of this.root.querySelectorAll("[data-sched]")) {
+        el.textContent = schedText(at(this.draft, el.dataset.sched));
+      }
+      for (const el of this.root.querySelectorAll("[data-until]")) {
+        el.textContent = untilText(at(this.draft, el.dataset.until), +el.dataset.i);
+      }
       this.guards();
     }
 
@@ -255,7 +261,7 @@
     }
 
     async reset() {
-      if (!confirm("Replace all profiles with the defaults (day, night, away)?")) return;
+      if (!confirm("Replace all profiles with the defaults (Day and Night schedules with their stages, Away)?")) return;
       try {
         const r = await api("POST", this.resetUrl);
         if (r.status !== 200) {
@@ -391,6 +397,15 @@
 
   window.ruleSummary = summary;
 
+  // A schedule's stages: "06:00 day_cool · 09:00 day (default) · …", and the time one stage runs until.
+  const schedText = (stages) => (Array.isArray(stages)
+    ? stages.map((st) => (st.from || "?") + " " + st.profile + (st.default ? " (default)" : "")).join(" · ") : "");
+
+  function untilText(stages, i) {
+    if (!Array.isArray(stages) || !stages[i]) return "";
+    return stages.length === 1 ? "all day" : "until " + (stages[(i + 1) % stages.length].from || "?");
+  }
+
   // --- Profiles tab
 
   function uniqueName(taken, base) {
@@ -504,6 +519,7 @@
     ed.edit(() => {
       const out = {};
       for (const [k, v] of Object.entries(ed.draft.profiles)) out[k === old ? name : k] = v;
+      for (const p of Object.values(out)) for (const st of p.stages || []) if (st.profile === old) st.profile = name;
       ed.draft.profiles = out;
       ed.rekey("profiles." + old, "profiles." + name);
     });
@@ -513,7 +529,7 @@
     // "copy a rule from…": the other profiles' rules; the copy gets a free name.
     const from = [];
     for (const [pn, p] of Object.entries(ed.draft.profiles)) {
-      if (pn !== name) p.rules.forEach((r, i) => from.push([pn + "/" + i, pn + ": " + r.name]));
+      if (pn !== name && p.rules) p.rules.forEach((r, i) => from.push([pn + "/" + i, pn + ": " + r.name]));
     }
     if (!from.length) return null;
     const s = h("select", { "aria-label": "copy a rule from another profile", disabled: rules.length >= MAX.rules },
@@ -530,49 +546,118 @@
     return s;
   }
 
-  function profileBlock(ed, name) {
-    const path = "profiles." + name;
-    const prof = ed.draft.profiles[name];
+  // --- schedules: stages that run other profiles' rules by the time of day (ADR 0006)
+
+  const ruleProfiles = (ed) => Object.keys(ed.draft.profiles).filter((n) => ed.draft.profiles[n].rules).sort();
+  const usedBy = (ed, name) => Object.keys(ed.draft.profiles).filter((n) =>
+    (ed.draft.profiles[n].stages || []).some((st) => st.profile === name));
+  const pad = (n) => String(n).padStart(2, "0");
+
+  function hhmm(ed, path, label) {
+    // type=time with a 60 s step gives "HH:MM" in 24 h, whatever the phone shows.
+    const input = h("input", { type: "time", step: 60, value: at(ed.draft, path) ?? "", "data-path": path,
+                               "aria-label": label || path });
+    input.addEventListener("input", () => ed.set(path, input.value));
+    input.addEventListener("change", () => ed.validateSoon());
+    return wrap(label, input);
+  }
+
+  function newStage(ed, stages) {
+    // An hour after the last stage, on its profile.
+    const last = stages[stages.length - 1];
+    const m = /^(\d\d):(\d\d)$/.exec(last ? last.from : "");
+    const t = m ? (+m[1] * 60 + +m[2] + 60) % 1440 : 360;
+    return { from: pad(Math.floor(t / 60)) + ":" + pad(t % 60), profile: last ? last.profile : ruleProfiles(ed)[0] };
+  }
+
+  function stageRow(ed, path, stages, i, listPath, group) {
+    const st = stages[i];
+    const names = ruleProfiles(ed);
+    if (st.profile && !names.includes(st.profile)) names.push(st.profile); // deleted or a schedule: Save marks it
+    const label = (n) => (ed.draft.profiles[n] ? ed.draft.profiles[n].label + " (" + n + ")" : n);
+    const radio = h("input", { type: "radio", name: group, checked: !!st.default, "data-path": path + ".default" });
+    radio.addEventListener("change", () => ed.edit(() => stages.forEach((x, j) => {
+      if (j === i) x.default = true; else delete x.default;
+    })));
+    return h("div", { class: "phase", "data-block": path },
+      h("div", { class: "grid" },
+        hhmm(ed, path + ".from", "from"),
+        sel(ed, path + ".profile", "runs", names.map((n) => [n, label(n)])),
+        wrap(null, h("label", null, radio, " default")),
+        h("span", { class: "lock", "data-until": listPath, "data-i": i })),
+      moves(ed, stages, i, listPath, 1));
+  }
+
+  function stagesBody(ed, name, path, prof) {
+    const stages = prof.stages, listPath = path + ".stages";
+    return [
+      h("div", { class: "sum", "data-sched": listPath }),
+      h("div", { "data-block": listPath },
+        stages.map((st, i) => stageRow(ed, listPath + "[" + i + "]", stages, i, listPath, "default-" + name))),
+      h("div", { class: "tools" }, button("+ stage", () => ed.edit(() => stages.push(newStage(ed, stages))),
+        { disabled: stages.length >= MAX.stages })),
+    ];
+  }
+
+  function rulesBody(ed, name, path, prof) {
     const rules = prof.rules;
     const add = () => ed.edit(() => {
       rules.push(newRule(rules));
       ed.open.add(path + ".rules[" + (rules.length - 1) + "]");
     });
+    return [
+      h("div", { "data-block": path + ".rules" }, rules.map((r, i) => ruleBlock(ed, path + ".rules[" + i + "]", rules, i,
+        path + ".rules"))),
+      h("div", { class: "tools" }, button("+ rule", add, { disabled: rules.length >= MAX.rules }),
+        copyRule(ed, name, rules)),
+    ];
+  }
+
+  function profileBlock(ed, name) {
+    const path = "profiles." + name;
+    const prof = ed.draft.profiles[name];
     const duplicate = () => {
       const copy = askName(ed, "Name for the copy of " + name, uniqueName(Object.keys(ed.draft.profiles), name));
       if (copy) ed.edit(() => { ed.draft.profiles[copy] = Object.assign(clone(prof), { label: copy }); });
     };
     const remove = () => {
-      if (confirm("Delete profile " + name + "?")) ed.edit(() => { delete ed.draft.profiles[name]; });
+      const users = usedBy(ed, name);
+      const ask = "Delete profile " + name + "?" + (users.length ? " Schedule " + users.join(", ") + " runs it." : "");
+      if (confirm(ask)) ed.edit(() => { delete ed.draft.profiles[name]; });
     };
-    return details(ed, path, [h("b", { "data-text": path + ".label" }), " ", h("span", { class: "lock", "data-badge": name })],
+    const head = [h("b", { "data-text": path + ".label" }), " ", h("span", { class: "lock", "data-badge": name }),
+      prof.stages && h("span", { class: "lock" }, " · schedule")];
+    return details(ed, path, head,
       h("div", { class: "grid" },
         text(ed, path + ".label", "label", { maxLength: 32, cls: "wide" }),
         h("div", { class: "tools" },
           button("rename", () => renameProfile(ed, name), { "data-guard": name }),
           button("duplicate", duplicate, { disabled: Object.keys(ed.draft.profiles).length >= MAX.profiles }),
           button("delete", remove, { "data-guard": name }))),
-      h("div", { "data-block": path + ".rules" }, rules.map((r, i) => ruleBlock(ed, path + ".rules[" + i + "]", rules, i,
-        path + ".rules"))),
-      h("div", { class: "tools" }, button("+ rule", add, { disabled: rules.length >= MAX.rules }),
-        copyRule(ed, name, rules)));
+      ...(prof.stages ? stagesBody(ed, name, path, prof) : rulesBody(ed, name, path, prof)));
   }
 
   function profilesView(ed) {
     const names = Object.keys(ed.draft.profiles).sort();
-    const add = () => {
-      const name = askName(ed, "Name of the new profile (a–z, 0–9, _)");
+    const full = names.length >= MAX.profiles;
+    const create = (kind, body) => {
+      const name = askName(ed, "Name of the new " + kind + " (a–z, 0–9, _)");
       if (name) ed.edit(() => {
-        ed.draft.profiles[name] = { label: name, rules: [newRule([])] };
+        ed.draft.profiles[name] = Object.assign({ label: name }, body());
         ed.open.add("profiles." + name);
       });
     };
+    const first = ruleProfiles(ed)[0];
     return [
       h("p", { class: "hint" }, "A profile is a list of rules; the first rule whose trigger holds starts a cycle. "
+        + "A schedule runs other profiles by the time of day, its default stage while the Pico doesn't know the time. "
         + "Saved changes apply from the next tick; a running cycle finishes with the rule it started with."),
       ed.top,
       h("div", { "data-block": "profiles" }, names.map((n) => profileBlock(ed, n))),
-      h("div", { class: "tools" }, button("+ profile", add, { disabled: names.length >= MAX.profiles })),
+      h("div", { class: "tools" },
+        button("+ profile", () => create("profile", () => ({ rules: [newRule([])] })), { disabled: full }),
+        button("+ schedule", () => create("schedule",
+          () => ({ stages: [{ from: "06:00", profile: first, default: true }] })), { disabled: full || !first })),
     ];
   }
 

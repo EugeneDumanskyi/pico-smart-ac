@@ -1,7 +1,7 @@
 {
   "name": "remote_in_takeover",
   "profiles": "default",
-  "active": "day",
+  "active": "day_morning",
   "settings": {"manual_hold_min": 10, "finish_fan_min": 10},
   "start_ms": 0,
   "snapshot": null,

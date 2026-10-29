@@ -9,7 +9,8 @@
 # tick applies it before it reads, so only the control task touches the controller and the client.
 import asyncio
 
-from smartac.core import config
+from smartac.core import clock, config
+from smartac.core.clock import Clock
 from smartac.core.config import OFF
 from smartac.core.controller import FINISH, Controller
 from smartac.core.events import EventLog, to_line
@@ -21,6 +22,7 @@ from smartac.core.types import (
     CMD_WRITE,
     EV_BLOCKED,
     EV_BOOT,
+    EV_CLOCK,
     EV_CONFIG_SAVED,
     OBSERVE,
     Reading,
@@ -96,6 +98,8 @@ class App:
             self.active = profiles.get("active")  # as stored in profiles.json
         self.history = History()
         self.events = EventLog(self.boot)
+        self.clock = Clock()  # wall time from the AC's last operation, the page's as backup; picks the stage
+        self.phone_s = None  # the page's clock minus ours at its last POST /api/clock, in s
         self.queue = []
         self.pending = {}  # name -> a saved document the next tick applies
         self.wake = asyncio.Event()
@@ -177,6 +181,7 @@ class App:
                     "target_c": None if ac is None else _c(ac.target),
                     "fan": None if ac is None else ac.fan,
                 },
+                "clock": self._clock(now),
                 "dry_run": self._settings()["dry_run"],
                 "poll_s": self._settings()["poll_s"],
                 "shadow": self.shadow,
@@ -185,6 +190,7 @@ class App:
                         "name": k,
                         "label": profiles[k].get("label", k),
                         "rules": [r.get("name") for r in profiles[k].get("rules", [])],
+                        "schedule": "stages" in profiles[k],
                     }
                     for k in sorted(profiles)
                 ],
@@ -201,6 +207,17 @@ class App:
             }
         )
         return s
+
+    def phone_time(self, text):
+        # POST /api/clock: the page's local time as "2026-10-28T09:32:02Z" -> (status, body).
+        wall = clock.parse(text)
+        if wall is None:
+            return 400, {"error": "time must be YYYY-MM-DDTHH:MM:SSZ, local, from %d on" % clock.MIN_YEAR}
+        now = self._now()
+        msg, self.phone_s = self.clock.phone(now, wall)
+        if msg is not None:
+            self._event(now, EV_CLOCK, msg)
+        return 200, self._clock(now)
 
     async def test_ac(self, ip=None):
         # Settings tab, "Test connection": read the adapter's info at `ip` (None: the address in use). -> the reply.
@@ -405,7 +422,7 @@ class App:
 
     def _step(self, now, reading, actions, readback=False):
         # The seam the simulator's runner overrides to watch every step.
-        return self.controller.step(now, reading, actions, readback)
+        return self.controller.step(now, reading, actions, readback, self.clock.minute(now))
 
     async def _read(self):
         if self.client is None:
@@ -416,11 +433,14 @@ class App:
         if reading.ac is None:
             self.read_errors += 1
         self.last_reading = reading
-        self._now()
+        now = self._now()
         self.history.add(self.uptime_ms, reading)
         if reading.ac is not None:
             self.seen_ac = True
             self.unreachable_since = None
+            msg = self.clock.observe(now, reading.last_op)
+            if msg is not None:
+                self._event(now, EV_CLOCK, msg)
         elif self.unreachable_since is None:
             self.unreachable_since = self.uptime_ms
         return reading
@@ -447,6 +467,11 @@ class App:
             profiles["active"] = snap["profile"]
             self.store.save("profiles", profiles)
             self.active = snap["profile"]
+
+    def _clock(self, now):
+        s = self.clock.status(now)
+        s["phone_s"] = self.phone_s
+        return s
 
     def _event(self, now, kind, msg):
         # Each event carries the last reading: the one this step decided on.

@@ -1,7 +1,7 @@
 {
   "name": "night_humid_cycle",
   "profiles": "default",
-  "active": "night",
+  "active": "night_evening",
   "settings": {},
   "start_ms": 0,
   "snapshot": null,

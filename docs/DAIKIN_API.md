@@ -130,8 +130,10 @@ Read only (op 2), measured from the Mac; the Pico gets the same bytes.
 - Other filters: `filter=pn` = full size, `filter=md` = 8 178 indoor; `filter=pv,pn` = `filter=pv`.
 - Reply time ~0.2–0.4 s from the Mac; from the Pico 0.5–0.6 s for the full indoor read, one outlier 3.9 s.
 - On the Pico, parsing the full indoor reply holds ~53 KB of heap (firmware.md). `?filter=pv` should halve that.
-- `dgc_status` also has `last_ope` (`type`, `time`, `chg_flg`); `time` reads as local time with a `Z` suffix.
-  Meaning of `type` not known yet (99 seen while the unit was off).
+- `dgc_status` also has `last_ope` (`type`, `time`, `chg_flg`), next to `e_1002` and kept by `?filter=pv`. `time` is
+  the local time of the last operation with a `Z` suffix (`"2026-10-28T08:49:01Z"`); after an API write it matched the
+  write to the second, `type` 100 (99 seen while the unit was off; other values not mapped yet). `core/clock.py` uses
+  it as the time of day (ADR 0006).
 
 ## Write format used by the codec
 

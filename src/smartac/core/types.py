@@ -68,6 +68,8 @@ EV_IGNORED = "ignored"  # an action that doesn't apply in the current state
 EV_LOW_MEMORY = "low_memory"  # free heap or the largest block fell below its threshold (shell/tasks.py)
 EV_HEAP = "heap"  # hourly free heap and largest block, to events.log only (shell/tasks.py)
 EV_BLOCKED = "blocked"  # shadow mode: a write reached the shell and was not sent (shell/app.py)
+EV_CLOCK = "clock"  # the wall clock was set, moved or lost (core/clock.py, shell/app.py)
+EV_STAGE = "stage"  # a schedule's stage took over (core/controller.py)
 
 
 def tenths(celsius):
@@ -109,13 +111,15 @@ class ACState:
 
 class Reading:
     # One poll of the AC. ac is None when the AC could not be read (then error says why).
-    # A sensor is None when it was missing or outside its sanity range.
-    def __init__(self, ac=None, temp=None, hum=None, outdoor_temp=None, error=None):
+    # A sensor is None when it was missing or outside its sanity range. last_op: the AC's last operation,
+    # (time text, type) or None (core/clock.py).
+    def __init__(self, ac=None, temp=None, hum=None, outdoor_temp=None, error=None, last_op=None):
         self.ac = ac
         self.temp = temp
         self.hum = hum
         self.outdoor_temp = outdoor_temp
         self.error = error
+        self.last_op = last_op
 
     @staticmethod
     def unreachable(error):

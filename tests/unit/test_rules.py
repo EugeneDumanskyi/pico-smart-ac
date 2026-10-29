@@ -195,7 +195,7 @@ class TestFirstMatch(unittest.TestCase):
         self.assertEqual(self.sel.observe([HOT, HUMID], reading(temp=300, hum=80), 2 * MIN), 0)
 
     def test_default_day_profile(self):
-        rules = config.default_profiles()["profiles"]["day"]["rules"]
+        rules = config.default_profiles()["profiles"]["day_morning"]["rules"]
         self.assertEqual(self.confirm(rules, reading(temp=300, hum=80)), 0)  # too_hot
         self.sel.reset()
         self.assertEqual(self.confirm(rules, reading(temp=290, hum=76), 5 * MIN), 1)  # humid

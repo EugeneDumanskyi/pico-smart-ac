@@ -1,7 +1,7 @@
 {
   "name": "pause_leave",
   "profiles": "default",
-  "active": "day",
+  "active": "day_morning",
   "settings": {},
   "start_ms": 0,
   "snapshot": null,

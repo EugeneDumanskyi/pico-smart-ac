@@ -238,7 +238,7 @@ class TestRoutes(unittest.TestCase):
         self.assertEqual((codes, app.fault), ([200], True))
 
     def test_api_action_is_queued_and_logged(self):
-        run = {"action": "run", "profile": "day", "rule": 1}
+        run = {"action": "run", "profile": "day_morning", "rule": 1}
         app, codes, notes = self.exchange(post("/api/action", run))
         self.assertEqual((codes, app.queue, notes), ([202], [run], ["action %s" % app.queue[0]]))
 

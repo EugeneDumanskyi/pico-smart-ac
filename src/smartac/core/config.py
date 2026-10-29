@@ -36,59 +36,100 @@ def _rule(name, when, phases, cooldown_min, min_interval_min=0, confirm_reads=2)
     }
 
 
+def _day_rules(fan_min=20, cooldown_min=10):
+    return [
+        _rule(
+            "too_hot",
+            _when(_cond("temp", ">", 29)),
+            [
+                _phase("cool", "3", 30, _cond("temp", "<=", 26), target_c=26),
+                _phase("fan", "3", fan_min),
+            ],
+            cooldown_min,
+        ),
+        _rule(
+            "humid",
+            _when(_cond("hum", ">", 75)),
+            [
+                # The temp goal is a floor: on a very humid day hum may not get to 65 before the room is too cold.
+                _phase("cool", "3", 40, [_cond("hum", "<=", 65), _cond("temp", "<=", 25)], target_c=26),
+                _phase("fan", "3", fan_min),
+            ],
+            cooldown_min,
+        ),
+    ]
+
+
+def _night_rules(fan_min=15, warm_cooldown_min=30, humid_cooldown_min=40):
+    return [
+        _rule(
+            "warm",
+            _when(_cond("temp", ">", 27)),
+            [
+                _phase("cool", "3", 20, _cond("temp", "<=", 25), target_c=25),
+                _phase("fan", "3", fan_min),
+            ],
+            warm_cooldown_min,
+        ),
+        _rule(
+            "humid",
+            _when(_cond("hum", ">", 88)),
+            [
+                _phase("cool", "3", 25, _cond("hum", "<=", 70), target_c=25.5),
+                _phase("fan", "3", fan_min),
+            ],
+            humid_cooldown_min,
+        ),
+    ]
+
+
+def _stage(start, profile, default=False):
+    st = {"from": start, "profile": profile}
+    if default:
+        st["default"] = True
+    return st
+
+
 def default_profiles():
+    # Day and Night are schedules (ADR 0006): each stage runs one of the rule profiles below from its start time.
+    # The stage values are first guesses, to be tuned from the logs.
     return {
         "version": VERSION,
         "active": OFF,
         "profiles": {
             "day": {
                 "label": "Day",
-                "rules": [
-                    _rule(
-                        "too_hot",
-                        _when(_cond("temp", ">", 29)),
-                        [
-                            _phase("cool", "3", 30, _cond("temp", "<=", 26), target_c=26),
-                            _phase("fan", "3", 20),
-                        ],
-                        cooldown_min=10,
-                    ),
-                    _rule(
-                        "humid",
-                        _when(_cond("hum", ">", 75)),
-                        [
-                            # The temp goal is a floor: on a very humid day hum may not get to 65 before the room
-                            # is too cold.
-                            _phase("cool", "3", 40, [_cond("hum", "<=", 65), _cond("temp", "<=", 25)], target_c=26),
-                            _phase("fan", "3", 20),
-                        ],
-                        cooldown_min=10,
-                    ),
+                "stages": [
+                    _stage("06:00", "day_early_morning"),
+                    _stage("09:00", "day_morning", default=True),
+                    _stage("12:00", "day_afternoon"),
+                    _stage("13:30", "day_hot_afternoon"),
+                    _stage("17:00", "day_evening"),
                 ],
             },
+            # Cooler mornings and evenings: a longer fan after each cycle.
+            "day_early_morning": {"label": "Day early morning", "rules": _day_rules(fan_min=30)},
+            "day_morning": {"label": "Day morning", "rules": _day_rules()},
+            "day_afternoon": {"label": "Day afternoon", "rules": _day_rules()},
+            # The hottest hours: the room warms up again fast, so a short cooldown.
+            "day_hot_afternoon": {"label": "Day hot afternoon", "rules": _day_rules(cooldown_min=5)},
+            "day_evening": {"label": "Day evening", "rules": _day_rules(fan_min=30)},
             "night": {
                 "label": "Night",
-                "rules": [
-                    _rule(
-                        "warm",
-                        _when(_cond("temp", ">", 27.5)),
-                        [
-                            _phase("cool", "3", 20, _cond("temp", "<=", 25), target_c=25),
-                            _phase("fan", "3", 15),
-                        ],
-                        cooldown_min=30,
-                    ),
-                    _rule(
-                        "humid",
-                        _when(_cond("hum", ">", 88)),
-                        [
-                            _phase("cool", "3", 25, _cond("hum", "<=", 70), target_c=25.5),
-                            _phase("fan", "3", 15),
-                        ],
-                        cooldown_min=40,
-                    ),
+                "stages": [
+                    _stage("21:00", "night_evening", default=True),
+                    _stage("23:00", "night_early_night"),
+                    _stage("01:00", "night_midnight"),
+                    _stage("04:00", "night_early_morning"),
+                    _stage("06:00", "night_morning"),
                 ],
             },
+            "night_evening": {"label": "Night evening", "rules": _night_rules()},
+            # After 23:00 a longer fan, and a longer cooldown so that cycles don't run back to back.
+            "night_early_night": {"label": "Night early night", "rules": _night_rules(25, 40, 40)},
+            "night_midnight": {"label": "Night midnight", "rules": _night_rules(25, 40, 40)},
+            "night_early_morning": {"label": "Night early morning", "rules": _night_rules(25, 45, 45)},
+            "night_morning": {"label": "Night morning", "rules": _night_rules(25, 45, 45)},
             "away": {
                 "label": "Away",
                 "rules": [
@@ -129,7 +170,8 @@ def default_settings(ac_ip=None):
 
 MAX_DOC_BYTES = 16 * 1024
 NAME_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789_"
-MAX_PROFILES = 10
+MAX_PROFILES = 20
+MAX_STAGES = 8
 MAX_LABEL = 32
 OPS = (">", ">=", "<", "<=")
 FALLING_OPS = ("<", "<=")
@@ -140,7 +182,8 @@ GOAL_SENSORS = {"cool": ("temp", "hum"), "dry": ("hum", "temp")}
 MAX_GOALS = 2
 
 PROFILES_KEYS = ("version", "active", "profiles")
-PROFILE_KEYS = ("label", "rules")
+PROFILE_KEYS = ("label", "rules", "stages")  # exactly one of rules and stages
+STAGE_KEYS = ("from", "profile", "default")
 RULE_KEYS = ("name", "when", "confirm_reads", "phases", "cooldown_min", "min_interval_min")
 WHEN_KEYS = ("match", "conditions")
 COND_KEYS = ("sensor", "op", "value")
@@ -346,8 +389,10 @@ def validate_profiles(doc, hard_cap_min=120):
                 if pname == OFF:
                     rep.error(ppath, '"off" is reserved')
                 names.append(pname)
-            if not _obj(rep, ppath, prof, PROFILE_KEYS, ("rules",)):
+            if not _obj(rep, ppath, prof, PROFILE_KEYS, ()):
                 continue
+            if ("rules" in prof) == ("stages" in prof):
+                rep.error(ppath, "needs rules or stages, not both")
             label = prof.get("label")
             if label is not None and (not isinstance(label, str) or len(label) > MAX_LABEL):
                 rep.error(_join(ppath, "label"), "text, at most %d characters" % MAX_LABEL)
@@ -359,11 +404,75 @@ def validate_profiles(doc, hard_cap_min=120):
                     if isinstance(rname, str) and rname in seen:
                         rep.error(_join(_join(rpath, i), "name"), "duplicate rule name")
                     seen.append(rname)
+            if "stages" in prof:
+                _check_stages(rep, _join(ppath, "stages"), prof["stages"], profiles)
     elif "profiles" in doc:
         rep.error("profiles", "must be an object")
     if "active" in doc and doc["active"] != OFF and doc["active"] not in names:
         rep.error("active", 'must be "off" or a profile name')
     return rep.errors, rep.warnings
+
+
+def minute_of(text):
+    # "HH:MM" -> minutes after midnight, or None.
+    if not isinstance(text, str) or len(text) != 5 or text[2] != ":":
+        return None
+    hh, mm = text[:2], text[3:]
+    if any(ch not in "0123456789" for ch in hh + mm) or int(hh) > 23 or int(mm) > 59:
+        return None
+    return int(hh) * 60 + int(mm)
+
+
+def stage_at(stages, minute):
+    # The index of a valid schedule's stage that runs at `minute` (after midnight): the one with the latest start at
+    # or before it; before the earliest start, the latest one still runs from the evening before. None: the default.
+    if minute is None:
+        for i, st in enumerate(stages):
+            if st.get("default"):
+                return i
+        return 0
+    best = last = None
+    for i, st in enumerate(stages):
+        start = minute_of(st["from"])
+        if start <= minute and (best is None or start > minute_of(stages[best]["from"])):
+            best = i
+        if last is None or start > minute_of(stages[last]["from"]):
+            last = i
+    return last if best is None else best
+
+
+def _check_stages(rep, path, stages, profiles):
+    # A schedule: each stage runs its rule profile from its time until the next stage's; the last one runs past
+    # midnight into the first. The default stage runs while the time of day is unknown (ADR 0006).
+    if not _list_len(rep, path, stages, 1, MAX_STAGES, "stages"):
+        return
+    starts = []
+    defaults = 0
+    for i, st in enumerate(stages):
+        spath = _join(path, i)
+        if not _obj(rep, spath, st, STAGE_KEYS, ("from", "profile")):
+            starts.append(None)
+            continue
+        start = minute_of(st.get("from"))
+        if "from" in st and start is None:
+            rep.error(_join(spath, "from"), "must be a time HH:MM, 00:00–23:59")
+        starts.append(start)
+        target = profiles.get(st.get("profile")) if isinstance(st.get("profile"), str) else None
+        if "profile" in st and not (isinstance(target, dict) and "rules" in target and "stages" not in target):
+            rep.error(_join(spath, "profile"), "must name a profile with rules")
+        default = st.get("default", False)
+        if not isinstance(default, bool):
+            rep.error(_join(spath, "default"), "must be true or false")
+        elif default:
+            defaults += 1
+    if defaults != 1:
+        rep.error(path, "mark exactly one stage as the default")
+    if None in starts:
+        return
+    # Clock order from the first stage: the times go up, except for one step back past midnight at most.
+    n = len(starts)
+    if sum(1 for i in range(n) if starts[(i + 1) % n] <= starts[i]) > 1:
+        rep.error(path, "times must be in clock order and different, crossing midnight once")
 
 
 def validate_settings(settings, profiles=None):

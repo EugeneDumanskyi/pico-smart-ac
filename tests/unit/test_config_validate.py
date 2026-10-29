@@ -5,7 +5,11 @@ from smartac.core import config
 
 
 def profiles():
-    return config.default_profiles()
+    # Three rule profiles of the defaults under short names; the default schedules are checked in test_config.
+    doc = config.default_profiles()
+    p = doc["profiles"]
+    doc["profiles"] = {"day": p["day_morning"], "night": p["night_evening"], "away": p["away"]}
+    return doc
 
 
 def first_rule(doc):
@@ -75,7 +79,7 @@ class TestTopLevel(ProfileCase):
         doc["profiles"]["Day-2"] = doc["profiles"]["day"]
         self.assertRejects(doc, "profiles.Day-2")
         doc = profiles()
-        for i in range(8):
+        for i in range(18):
             doc["profiles"]["p%d" % i] = profiles()["profiles"]["away"]
         self.assertRejects(doc, "profiles")
 
@@ -296,6 +300,78 @@ class TestWarnings(ProfileCase):
         self.assertEqual(self.warnings, [])
 
 
+class TestStages(ProfileCase):
+    def doc(self, *starts, **kw):
+        doc = profiles()
+        doc["profiles"]["sched"] = schedule(*starts, **kw)
+        return doc
+
+    def test_a_schedule_is_valid_and_may_be_active(self):
+        doc = self.doc("06:00", "09:00", "13:30", "17:00", default=1)
+        doc["active"] = "sched"
+        self.assertEqual(config.validate_profiles(doc), ([], []))
+        self.assertEqual(self.check(self.doc("21:00", "23:00", "01:00", "04:00", "06:00")), [])
+        self.assertEqual(self.check(self.doc("12:00")), [])  # one stage: all day
+
+    def test_rules_or_stages(self):
+        doc = self.doc("06:00")
+        doc["profiles"]["sched"]["rules"] = profiles()["profiles"]["day"]["rules"]
+        self.assertEqual(self.assertRejects(doc, "profiles.sched"), "needs rules or stages, not both")
+        doc = profiles()
+        del doc["profiles"]["day"]["rules"]
+        self.assertRejects(doc, "profiles.day")
+
+    def test_stage_fields(self):
+        doc = self.doc("06:00", "18:00")
+        stages = doc["profiles"]["sched"]["stages"]
+        del stages[1]["profile"]
+        stages[1]["until"] = "20:00"
+        got = self.check(doc)
+        self.assertIn("profiles.sched.stages[1].profile", got)
+        self.assertIn("profiles.sched.stages[1].until", got)
+        self.assertRejects(self.doc("06:00", default=None), "profiles.sched.stages")
+        self.assertEqual(self.check(self.doc("06:00", "07:00", "08:00", default=None)), ["profiles.sched.stages"])
+
+    def test_times(self):
+        for bad in ("6:00", "06:0", "06-00", "24:00", "12:60", "ab:cd", 600, None):
+            self.assertRejects(self.doc("00:00", bad), "profiles.sched.stages[1].from")
+        self.assertEqual(minute_cases(), [0, 359, 810, 1439, None])
+
+    def test_clock_order(self):
+        for starts in (("06:00", "06:00"), ("09:00", "06:00", "12:00", "03:00"), ("23:00", "01:00", "00:30")):
+            msg = self.assertRejects(self.doc(*starts), "profiles.sched.stages")
+            self.assertIn("clock order", msg)
+        self.assertEqual(self.check(self.doc("23:59", "00:00")), [])
+
+    def test_two_defaults(self):
+        doc = self.doc("06:00", "18:00")
+        doc["profiles"]["sched"]["stages"][1]["default"] = True
+        self.assertEqual(self.assertRejects(doc, "profiles.sched.stages"), "mark exactly one stage as the default")
+        doc["profiles"]["sched"]["stages"][1]["default"] = 1
+        self.assertRejects(doc, "profiles.sched.stages[1].default")
+
+    def test_stage_profiles(self):
+        for target in ("off", "nope", "sched", 5, None):
+            self.assertRejects(self.doc("06:00", profile=target), "profiles.sched.stages[0].profile")
+        doc = self.doc("06:00")
+        doc["profiles"]["other"] = schedule("07:00")
+        doc["profiles"]["sched"]["stages"][0]["profile"] = "other"  # a schedule of a schedule
+        self.assertRejects(doc, "profiles.sched.stages[0].profile")
+
+    def test_deleting_a_stage_profile_is_refused(self):
+        doc = self.doc("06:00")
+        del doc["profiles"]["day"]
+        self.assertRejects(doc, "profiles.sched.stages[0].profile")
+
+    def test_hard_cap_skips_schedules(self):
+        doc = self.doc("06:00")
+        self.assertEqual(config.validate_settings(config.default_settings(), doc), ([], []))
+
+
+def minute_cases():
+    return [config.minute_of(t) for t in ("00:00", "05:59", "13:30", "23:59", "1:30")]
+
+
 class TestBrokenShapes(ProfileCase):
     def test_wrong_types_do_not_raise(self):
         cases = (
@@ -306,6 +382,8 @@ class TestBrokenShapes(ProfileCase):
             {"version": 1, "active": "off", "profiles": {"day": {"rules": [{"when": [], "phases": [None]}]}}},
             {"version": 1, "active": "off", "profiles": {"day": {"rules": [{"when": {"conditions": [7]}}]}}},
             {"version": 1, "active": ["day"], "profiles": {}},
+            {"version": 1, "active": "off", "profiles": {"s": {"stages": None}}},
+            {"version": 1, "active": "off", "profiles": {"s": {"stages": [None, {"from": 5, "profile": []}]}}},
         )
         for doc in cases:
             self.assertTrue(self.check(doc), doc)
@@ -387,6 +465,14 @@ def extra_profiles(n, rules=1):
     return add
 
 
+def schedule(*starts, profile="day", default=0):
+    # A schedule profile with a stage per start time, all running `profile`; stage `default` is the default.
+    stages = [{"from": t, "profile": profile} for t in starts]
+    if default is not None:
+        stages[default]["default"] = True
+    return {"label": "Sched", "stages": stages}
+
+
 def phase(doc, i):
     return first_rule(doc)["phases"][i]
 
@@ -432,7 +518,22 @@ TABLE = (
     ("rules per profile 1-8", "p", "profiles.day.rules",
      lambda d: d["profiles"]["day"].update(rules=rule_list(8)),
      lambda d: d["profiles"]["day"].update(rules=rule_list(9)), "error"),
-    ("profiles <= 10", "p", "profiles", extra_profiles(7), extra_profiles(8), "error"),
+    ("profiles <= 20", "p", "profiles", extra_profiles(17), extra_profiles(18), "error"),
+    ("stages per schedule 1-8", "p", "profiles.sched.stages",
+     lambda d: d["profiles"].update(sched=schedule(*["%02d:00" % h for h in range(8)])),
+     lambda d: d["profiles"].update(sched=schedule(*["%02d:00" % h for h in range(9)])), "error"),
+    ("stage from HH:MM", "p", "profiles.sched.stages[1].from",
+     lambda d: d["profiles"].update(sched=schedule("00:00", "23:59")),
+     lambda d: d["profiles"].update(sched=schedule("00:00", "24:00")), "error"),
+    ("stage times in clock order", "p", "profiles.sched.stages",
+     lambda d: d["profiles"].update(sched=schedule("21:00", "01:00", "06:00")),
+     lambda d: d["profiles"].update(sched=schedule("21:00", "06:00", "01:00")), "error"),
+    ("one default stage", "p", "profiles.sched.stages",
+     lambda d: d["profiles"].update(sched=schedule("06:00", "18:00")),
+     lambda d: d["profiles"].update(sched=schedule("06:00", "18:00", default=None)), "error"),
+    ("stage names a rule profile", "p", "profiles.sched.stages[0].profile",
+     lambda d: d["profiles"].update(sched=schedule("06:00")),
+     lambda d: d["profiles"].update(sched=schedule("06:00", profile="sched")), "error"),
     ("rule names [a-z0-9_]{1,24}", "p", R + ".name",
      lambda d: first_rule(d).update(name="a_9" + "x" * 21), lambda d: first_rule(d).update(name="Too hot"), "error"),
     ("profile names [a-z0-9_]{1,24}", "p", "profiles.Evening",

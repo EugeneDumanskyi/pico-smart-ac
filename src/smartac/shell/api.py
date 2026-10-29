@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # HTTP routes (idea.md, "HTTP API"): GET /, /editor.js, /history.js, /api/state, /api/history, /api/events,
 # /api/log[?tail=N], GET/PUT /api/profiles and /api/settings, POST /api/profiles/validate and /reset, POST /api/active,
-# /api/action and /api/ac/test. GETs are open on the LAN; a POST or PUT needs X-Token equal to API_TOKEN from
-# secrets.py, and with no token configured every one is refused. Unknown paths -> 404, other methods -> 405.
+# /api/action, /api/clock and /api/ac/test. GETs are open on the LAN; a POST or PUT needs X-Token equal to API_TOKEN
+# from secrets.py, and with no token configured every one is refused. Unknown paths -> 404, other methods -> 405.
 # Microdot has no read timeout: a client that stops mid-request would keep its socket and task forever, so each
 # request runs under a deadline. /api/history and /api/log are streamed. The page's files go out gzipped
 # (tools/build_web.py) to a client that takes gzip, streamed from flash as they are.
@@ -256,6 +256,15 @@ def make(app, www="/www", timeout_ms=REQUEST_TIMEOUT_MS, token=None):
             return _error(400, msg)
         keys = ("action", "minutes", "cycle", "profile", "rule")
         return queue({k: body[k] for k in keys if k in body})
+
+    @web.post("/api/clock")
+    async def phone_clock(req):
+        # {"time": "2026-10-28T09:32:02Z"}: the page's local time (ADR 0006) -> 200 {"time", "source", "phone_s"}.
+        body, err = json_object(req)
+        if err is not None:
+            return err
+        status, reply = app.phone_time(body.get("time"))
+        return reply, status
 
     @web.post("/api/ac/test")
     async def ac_test(req):

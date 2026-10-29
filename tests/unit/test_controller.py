@@ -76,7 +76,7 @@ def msgs(cmds):
 
 class Rig:
     # A controller, a fake clock and a fake AC that applies writes (unless apply is False).
-    def __init__(self, rules=None, active="test", snapshot=None, start=0, ac=OFF_AC, **settings):
+    def __init__(self, rules=None, active="test", snapshot=None, start=0, ac=OFF_AC, extra=None, **settings):
         self.profiles = {
             "version": 1,
             "active": active,
@@ -85,6 +85,7 @@ class Rig:
                 "other": {"label": "Other", "rules": [DAMP]},
             },
         }
+        self.profiles["profiles"].update(extra or {})
         self.settings = config.default_settings()
         self.settings.update(settings)
         self.now = start
@@ -93,6 +94,7 @@ class Rig:
         self.hum = 60
         self.apply = True
         self.reachable = True
+        self.minute = None  # of the day; None: the time is unknown
         self.snap = None
         self.ctl = c.Controller(self.profiles, self.settings, start, snapshot)
 
@@ -106,7 +108,7 @@ class Rig:
             rd = t.Reading(self.ac, temp=self.temp, hum=self.hum)
         else:
             rd = t.Reading.unreachable("timeout")
-        cmds = self.ctl.step(self.now, rd, actions, readback)
+        cmds = self.ctl.step(self.now, rd, actions, readback, self.minute)
         for kind, payload in cmds:
             if kind == t.CMD_WRITE and self.apply:
                 self.ac = payload
@@ -1338,3 +1340,160 @@ class TestPersist(unittest.TestCase):
         self.assertEqual(snap["cycle"]["cooldown_min"], 30)
         self.assertEqual(snap["cycle"]["hard_cap_min"], 120)
         self.assertEqual(rig.polls(5), [])
+
+
+# temp > 27: cool to 26 for 30 min, then fan 3 for 20 min; cooldown 10.
+WARM = rule("warm", cond("temp", ">", 27), [phase("cool", 30, target=26), phase("fan", 20, fan="3")], cooldown=10)
+
+
+def at(hhmm):
+    return config.minute_of(hhmm)
+
+
+def sched_rig(**kw):
+    # sched: test from 06:00, warm from 13:00 (the default), other from 21:00 to 06:00.
+    stages = [
+        {"from": "06:00", "profile": "test"},
+        {"from": "13:00", "profile": "warm", "default": True},
+        {"from": "21:00", "profile": "other"},
+    ]
+    extra = {"warm": {"label": "Warm", "rules": [WARM]}, "sched": {"label": "Sched", "stages": stages}}
+    rig = Rig(active="sched", extra=extra, **kw)
+    errors = config.validate_profiles(rig.profiles)[0]
+    assert not errors, errors
+    return rig
+
+
+class TestStages(unittest.TestCase):
+    def test_stage_at(self):
+        stages = sched_rig().profiles["profiles"]["sched"]["stages"]
+        for hhmm, i in (("06:00", 0), ("12:59", 0), ("13:00", 1), ("20:59", 1), ("21:00", 2), ("23:59", 2),
+                        ("00:00", 2), ("05:59", 2)):
+            self.assertEqual(config.stage_at(stages, at(hhmm)), i, hhmm)
+        self.assertEqual(config.stage_at(stages, None), 1)
+        # Night: the first stage is the evening one, the times cross midnight.
+        night = [{"from": f, "profile": "x"} for f in ("21:00", "23:00", "01:00", "04:00", "06:00")]
+        for hhmm, i in (("21:30", 0), ("23:00", 1), ("00:30", 1), ("01:00", 2), ("05:00", 3), ("12:00", 4),
+                        ("20:59", 4)):
+            self.assertEqual(config.stage_at(night, at(hhmm)), i, hhmm)
+        self.assertEqual(config.stage_at([{"from": "09:00", "profile": "x"}], at("08:00")), 0)
+
+    def test_unknown_time_runs_the_default(self):
+        rig = sched_rig()
+        self.assertIsNone(rig.status()["stage"])
+        cmds = rig.poll()
+        self.assertEqual(events(cmds), [t.EV_STAGE])
+        self.assertEqual(msgs(cmds), ["2/3 warm (default, time unknown)"])
+        self.assertEqual(
+            rig.status()["stage"],
+            {"n": 2, "of": 3, "from": "13:00", "profile": "warm", "default": True, "time_unknown": True},
+        )
+        self.assertEqual(rig.polls(3), [])
+        rig.temp = 280  # warm's trigger, not test's
+        self.assertEqual(writes(rig.poll()), [COOL])
+        self.assertEqual(rig.status()["cycle"]["rule"], "warm")
+
+    def test_the_time_picks_the_stage(self):
+        rig = sched_rig()
+        rig.poll()
+        rig.minute = at("13:30")  # the default stage: only the status changes
+        self.assertEqual(rig.poll(), [])
+        self.assertFalse(rig.status()["stage"]["time_unknown"])
+        rig.minute = at("02:00")
+        self.assertEqual(msgs(rig.poll()), ["3/3 other (from 21:00)"])
+        rig.minute = at("06:00")
+        self.assertEqual(msgs(rig.poll()), ["1/3 test (from 06:00)"])
+        rig.temp = 280  # below hot's 29: nothing
+        self.assertEqual(rig.polls(3), [])
+        rig.minute = None  # time lost: back to the default
+        cmds = rig.poll()
+        self.assertEqual(msgs(cmds)[0], "2/3 warm (default, time unknown)")
+        self.assertEqual(writes(cmds), [COOL])
+
+    def test_a_new_stage_never_cuts_a_cycle_or_its_cooldown(self):
+        rig = sched_rig()
+        rig.minute = at("12:00")
+        rig.poll()
+        rig.start_hot()
+        rig.minute = at("13:00")
+        cmds = rig.poll()
+        self.assertEqual(summary(cmds), [("event", t.EV_STAGE)])
+        self.assertEqual(rig.status()["cycle"]["rule"], "hot")
+        rig.polls(50)  # hot's cool 30 + fan 20 min, then off
+        self.assertEqual(rig.state, t.COOLDOWN)
+        self.assertEqual(rig.status()["cooldown_left_s"], 30 * 60)  # hot's cooldown, not warm's 10
+        rig.polls(29)
+        self.assertEqual(rig.state, t.COOLDOWN)
+        self.assertEqual(writes(rig.poll()), [COOL])  # warm's trigger (temp 28 > 27) right after it
+        self.assertEqual(rig.status()["cycle"]["rule"], "warm")
+
+    def test_trigger_counts_restart_with_a_new_profile(self):
+        slow = rule("slow", cond("temp", ">", 27), [phase("fan", 5)], confirm=3)
+        stages = [
+            {"from": "06:00", "profile": "a", "default": True},
+            {"from": "07:00", "profile": "a"},
+            {"from": "08:00", "profile": "b"},
+        ]
+        extra = {"a": {"rules": [slow]}, "b": {"rules": [slow]}, "s": {"stages": stages}}
+        rig = Rig(active="s", extra=extra)
+        rig.temp = 280
+        rig.minute = at("06:58")
+        rig.polls(2)
+        rig.minute = at("07:00")  # the same profile: the count goes on
+        cmds = rig.poll()
+        self.assertEqual(events(cmds), [t.EV_STAGE, t.EV_CYCLE_START])
+        rig.temp = 250
+        rig.polls(7)
+        self.assertEqual(rig.state, t.IDLE)
+        rig.temp = 280
+        rig.minute = at("07:58")
+        rig.polls(2)
+        rig.minute = at("08:00")  # another profile: confirm afresh
+        self.assertEqual(events(rig.poll()), [t.EV_STAGE])
+        self.assertEqual(events(rig.polls(2)), [t.EV_CYCLE_START])
+
+    def test_min_interval_holds_across_stages(self):
+        once = rule("once", cond("temp", ">", 27), [phase("fan", 5)], interval=60)
+        stages = [{"from": "06:00", "profile": "a", "default": True}, {"from": "07:00", "profile": "b"}]
+        extra = {"a": {"rules": [once]}, "b": {"rules": [once]}, "s": {"stages": stages}}
+        rig = Rig(active="s", extra=extra)
+        rig.temp = 280
+        rig.minute = at("06:50")
+        self.assertIn(t.EV_CYCLE_START, events(rig.poll()))
+        rig.minute = at("07:00")
+        rig.polls(7)
+        self.assertEqual(rig.state, t.IDLE)
+        self.assertEqual(rig.snap["intervals"], ["once"])  # b's rule of the same name
+        self.assertEqual(rig.polls(40), [])
+        self.assertIn(t.EV_CYCLE_START, events(rig.polls(20)))
+
+    def test_run_now_from_the_stage_profile(self):
+        once = rule("once", cond("temp", ">", 29), [phase("fan", 5)], interval=60)
+        stages = [{"from": "06:00", "profile": "a", "default": True}]
+        rig = Rig(active="s", extra={"a": {"rules": [once]}, "s": {"stages": stages}})
+        rig.poll()
+        rig.act(action="run", profile="a", rule=0)  # counts as a start of the running stage's rule
+        rig.polls(6)
+        rig.temp = 300
+        self.assertEqual(rig.polls(40), [])
+        self.assertEqual(events(rig.act(action="run", profile="s", rule=0)), [t.EV_IGNORED])
+
+    def test_profile_changes(self):
+        rig = sched_rig()
+        rig.poll()
+        cmds = rig.act(action="set_profile", profile="test")
+        self.assertEqual(events(cmds), [t.EV_PROFILE])
+        self.assertIsNone(rig.status()["stage"])
+        rig.temp = 280  # warm's trigger no longer applies
+        self.assertEqual(rig.polls(3), [])
+        cmds = rig.act(action="set_profile", profile="sched")
+        self.assertEqual(events(cmds), [t.EV_PROFILE, t.EV_STAGE, t.EV_CYCLE_START])
+
+    def test_an_edit_is_picked_up(self):
+        rig = sched_rig()
+        rig.poll()
+        profiles = json.loads(json.dumps(rig.profiles))
+        profiles["profiles"]["sched"]["stages"] = [{"from": "06:00", "profile": "other", "default": True}]
+        rig.ctl.configure(profiles)
+        self.assertIsNone(rig.status()["stage"])  # index 1 is gone
+        self.assertEqual(msgs(rig.poll()), ["1/1 other (default, time unknown)"])

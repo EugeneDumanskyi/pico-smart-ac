@@ -14,7 +14,7 @@ from smartac.core.types import FAN_AUTO, FANS, MODE_COOL, MODE_DRY, MODE_FAN, MO
 
 DAY_MIN = 24 * 60
 TAIL_MIN = 6 * 60
-PROFILE_RULES = {"day": 2, "night": 2, "away": 1}  # rules per default profile, for "run"
+PROFILE_RULES = {"day_morning": 2, "night_evening": 2, "away": 1}  # rules per default rule profile, for "run"
 
 # Expected events per day.
 REMOTE_PER_DAY = 3

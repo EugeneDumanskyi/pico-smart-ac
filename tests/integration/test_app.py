@@ -9,7 +9,7 @@ from sim.device import FakeDaikin
 from sim.harness import Scheduler
 from sim.server import DEFAULT_PORT, serve
 from smartac.board.host import HostBoard
-from smartac.core import config
+from smartac.core import clock, config
 from smartac.core import types as t
 from smartac.core.events import to_flash
 from smartac.shell.app import MAX_ACTIONS, SETTLE_MS, App
@@ -91,7 +91,7 @@ def stop_after_write(app, check=None):
 
 class TestTick(unittest.TestCase):
     def test_cycle_starts_and_the_read_back_confirms(self):
-        w = World("day")
+        w = World("day_morning")
         app = w.app()
         w.run(app, 70 * 1000)
         self.assertEqual([(s[0], s[1]) for s in w.steps], [(0, False), (60000, False), (60000 + SETTLE_MS, True)])
@@ -105,12 +105,49 @@ class TestTick(unittest.TestCase):
         self.assertEqual(s["state"], t.RUNNING)
 
     def test_rejected_write_is_counted_and_judged_by_the_read_back(self):
-        w = World("day")
+        w = World("day_morning")
         w.device.reject_writes(1)
         app = w.app()
         w.run(app, 70 * 1000)
         self.assertEqual((app.writes, app.write_errors, app.last_write_error), (1, 1, "rsc 4000"))
         self.assertEqual((app.controller.fails, app.controller.written), (1, COOL))
+
+    def test_our_write_sets_the_clock(self):
+        # The boot read's last_ope is an old operation; the write's shows on the read-back.
+        w = World("day_morning")
+        w.device.wall = w.device.op_wall = clock.parse("2026-10-28T08:00:00Z")
+        app = w.app()
+        w.run(app, 70 * 1000)
+        self.assertEqual(app.status()["clock"], {"time": "08:01", "source": "ac", "phone_s": None})
+        rows = [r for r in app.events.export(w.clock()) if r["kind"] == t.EV_CLOCK]
+        self.assertEqual([r["msg"] for r in rows], ["AC time 08:01:00 (type 100, clock set)"])
+        self.assertTrue(to_flash(t.EV_CLOCK))
+        self.assertEqual(app.clock.now_s(w.clock()), clock.parse("2026-10-28T08:01:00Z") + 5)
+
+    def test_no_last_ope_no_clock(self):
+        w = World("day_morning")
+        app = w.app()
+        w.run(app, 70 * 1000)
+        self.assertEqual(app.status()["clock"], {"time": None, "source": None, "phone_s": None})
+
+    def test_the_clock_picks_the_stage(self):
+        w = World()
+        profiles = config.default_profiles()
+        stages = [{"from": "06:00", "profile": "night_evening", "default": True},
+                  {"from": "12:00", "profile": "day_morning"}]
+        profiles["profiles"]["sched"] = {"label": "Sched", "stages": stages}
+        profiles["active"] = "sched"
+        self.assertEqual(config.validate_profiles(profiles), ([], []))
+        w.store.save("profiles", profiles)
+        app = w.app()
+        w.sched.at(10 * 1000, lambda: app.phone_time("2026-10-28T12:30:00Z"))
+        w.run(app, 70 * 1000)
+        rows = [r["msg"] for r in app.events.export(w.clock()) if r["kind"] == t.EV_STAGE]
+        # Newest first.
+        self.assertEqual(rows, ["2/2 day_morning (from 12:00)", "1/2 night_evening (default, time unknown)"])
+        self.assertEqual(app.status()["stage"]["profile"], "day_morning")
+        self.assertEqual([p["name"] for p in app.status()["profiles"] if p["schedule"]], ["day", "night", "sched"])
+        self.assertTrue(to_flash(t.EV_STAGE))
 
     def test_action_wakes_the_control_task(self):
         w = World()
@@ -129,7 +166,7 @@ class TestTick(unittest.TestCase):
 
 class TestStore(unittest.TestCase):
     def test_state_is_saved_before_the_write_is_sent(self):
-        w = World("day")
+        w = World("day_morning")
         app = w.app()
         seen = []
         stop_after_write(app, lambda state: seen.append(w.store.load("state")))
@@ -138,7 +175,7 @@ class TestStore(unittest.TestCase):
         self.assertEqual(seen[0]["written"], [True, "cool", 260, "3"])
 
     def test_reboot_after_the_write_finishes_the_cycle(self):
-        w = World("day")
+        w = World("day_morning")
         app = w.app()
         stop_after_write(app)
         w.run(app, 70 * 1000)
@@ -157,11 +194,11 @@ class TestStore(unittest.TestCase):
     def test_profile_switch_updates_the_stored_active(self):
         w = World()
         app = w.app()
-        w.sched.at(5 * 1000, lambda: app.action({"action": "set_profile", "profile": "night"}))
+        w.sched.at(5 * 1000, lambda: app.action({"action": "set_profile", "profile": "night_evening"}))
         w.run(app, 10 * 1000)
-        self.assertEqual(w.store.load("profiles")["active"], "night")
-        self.assertEqual(w.store.load("state")["profile"], "night")
-        self.assertEqual(w.app().controller.active, "night")
+        self.assertEqual(w.store.load("profiles")["active"], "night_evening")
+        self.assertEqual(w.store.load("state")["profile"], "night_evening")
+        self.assertEqual(w.app().controller.active, "night_evening")
 
     def test_broken_documents_fall_back_to_defaults(self):
         w = World()
@@ -194,7 +231,7 @@ class TestStore(unittest.TestCase):
 
     def test_full_flash_counts_instead_of_resetting(self):
         # The boot counters and the log can't be written; the profiles and the snapshot still can.
-        w = World("day")
+        w = World("day_morning")
         w.store.reset_counts("power_on")
         save = w.store.save
 
@@ -222,7 +259,7 @@ class TestStore(unittest.TestCase):
 class TestObserve(unittest.TestCase):
     def test_reads_and_records_but_never_writes(self):
         # The day profile would start a dry cycle on the second read (TestTick); observe mode sends nothing.
-        w = World("day")
+        w = World("day_morning")
         app = w.app(observe=True)
         self.assertIsNone(app.controller)
         w.run(app, 3 * 60 * 1000 + 1000)
@@ -294,7 +331,7 @@ def flash(store):
 
 
 class TestShadow(unittest.TestCase):
-    def world(self, active="day"):
+    def world(self, active="day_morning"):
         # settings.json asks for real writes: shadow mode must ignore that.
         w = World(active)
         w.store.save("settings", dict(config.default_settings(HOST), dry_run=False))
@@ -325,9 +362,11 @@ class TestShadow(unittest.TestCase):
         app = w.app(shadow=True)
         w.run(app, 1000)
         s = app.status()
-        self.assertEqual((s["shadow"], s["dry_run"], s["profile"], s["state"]), (True, True, "day", t.IDLE))
-        self.assertEqual([p["name"] for p in s["profiles"]], ["away", "day", "night"])
-        self.assertEqual(s["profiles"][1], {"name": "day", "label": "Day", "rules": ["too_hot", "humid"]})
+        self.assertEqual((s["shadow"], s["dry_run"], s["profile"], s["state"]), (True, True, "day_morning", t.IDLE))
+        self.assertEqual([p["name"] for p in s["profiles"]], sorted(config.default_profiles()["profiles"]))
+        want = {"name": "day_morning", "label": "Day morning", "rules": ["too_hot", "humid"], "schedule": False}
+        self.assertEqual(s["profiles"][6], want)
+        self.assertEqual(s["profiles"][1], {"name": "day", "label": "Day", "rules": [], "schedule": True})
         self.assertFalse(app.settings["dry_run"])  # settings.json itself is left as it is
         json.dumps(s)
 
@@ -369,17 +408,17 @@ class TestShadow(unittest.TestCase):
     def test_profile_action_starts_from_off(self):
         w = self.world("off")
         app = w.app(shadow=True)
-        w.sched.at(5 * 1000, lambda: app.action({"action": "set_profile", "profile": "day", "cycle": "finish"}))
+        w.sched.at(5 * 1000, lambda: app.action({"action": "set_profile", "profile": "day_morning", "cycle": "finish"}))
         w.run(app, 70 * 1000)
-        self.assertEqual(w.store.load("profiles")["active"], "day")
-        self.assertEqual([(d["kind"], d["msg"]) for d in flash(w.store)][1], (t.EV_PROFILE, "profile day"))
+        self.assertEqual(w.store.load("profiles")["active"], "day_morning")
+        self.assertEqual([(d["kind"], d["msg"]) for d in flash(w.store)][1], (t.EV_PROFILE, "profile day_morning"))
         self.assertEqual(app.controller.state, t.RUNNING)
         self.assertEqual(w.device.writes, 0)
 
 
 def day_short(doc):
     # Every day rule: 10 min of cool or dry and 5 min of fan (the room warms past too_hot's 29 C after a while).
-    for r in doc["profiles"]["day"]["rules"]:
+    for r in doc["profiles"]["day_morning"]["rules"]:
         r["phases"][0]["max_min"] = 10
         r["phases"][1]["max_min"] = 5
     return doc
@@ -390,15 +429,15 @@ def event_times(w, kind):
 
 
 class TestActions(unittest.TestCase):
-    # The Status tab's buttons (POST /api/action) through real ticks. World("day") starts "humid" (dry 60 min, then
-    # fan 3 for 20, cooldown 45) at 1:00.
+    # The Status tab's buttons (POST /api/action) through real ticks. World("day_morning") starts "humid" (dry 60 min,
+    # then fan 3 for 20, cooldown 45) at 1:00.
     def run_with(self, w, app, actions, until_ms):
         for at_ms, action in actions:
             w.sched.at(at_ms, lambda a=action: app.action(a))
         w.run(app, until_ms)
 
     def test_pause_finish_mid_phase(self):
-        w = World("day")
+        w = World("day_morning")
         app = w.app()
         self.run_with(w, app, [(5 * MIN, {"action": "pause", "minutes": 60, "cycle": "finish"})], 6 * MIN)
         self.assertEqual((app.controller.state, w.device.ac()), (t.RUNNING, FAN3))  # the rule's fan phase
@@ -409,7 +448,7 @@ class TestActions(unittest.TestCase):
         self.assertEqual(w.kinds()[-3:], [t.EV_PAUSE, t.EV_PHASE, t.EV_CYCLE_END])
 
     def test_pause_leave_then_resume(self):
-        w = World("day")
+        w = World("day_morning")
         app = w.app()
         self.run_with(w, app, [(5 * MIN, {"action": "pause", "minutes": None, "cycle": "leave"})], 10 * MIN)
         self.assertEqual((app.controller.state, w.device.ac()), (t.PAUSED, COOL))  # left running
@@ -419,7 +458,7 @@ class TestActions(unittest.TestCase):
         self.assertEqual((app.controller.state, w.kinds()[-2:]), (t.IDLE, [t.EV_PAUSE, t.EV_RESUME]))
 
     def test_stop_runs_the_fan_phase_then_off(self):
-        w = World("day")
+        w = World("day_morning")
         app = w.app()
         self.run_with(w, app, [(5 * MIN, {"action": "stop"})], 6 * MIN)
         self.assertEqual(w.device.ac(), FAN3)
@@ -429,27 +468,27 @@ class TestActions(unittest.TestCase):
         self.assertEqual((app.writes, app.write_errors), (3, 0))
 
     def test_stop_now_then_run_from_cooldown(self):
-        w = World("day")
+        w = World("day_morning")
         app = w.app()
         self.run_with(w, app, [(5 * MIN, {"action": "stop_now"})], 7 * MIN)
         self.assertEqual(app.controller.state, t.COOLDOWN)
         self.assertEqual(w.device.ac().power, False)
         self.assertEqual(app.writes, 2)  # dry, then off: no fan phase
         self.assertFalse(t.EV_PHASE in w.kinds())
-        self.run_with(w, app, [(10 * MIN, {"action": "run", "profile": "day", "rule": 0})], 11 * MIN)
+        self.run_with(w, app, [(10 * MIN, {"action": "run", "profile": "day_morning", "rule": 0})], 11 * MIN)
         self.assertEqual(app.controller.state, t.RUNNING)
         self.assertEqual(app.status()["cycle"]["rule"], "too_hot")
         self.assertEqual(w.device.ac().mode, t.MODE_COOL)
 
     def test_a_refused_action_is_an_ignored_event(self):
-        w = World("day")
+        w = World("day_morning")
         app = w.app()
-        self.run_with(w, app, [(5 * MIN, {"action": "run", "profile": "day", "rule": 0})], 6 * MIN)
+        self.run_with(w, app, [(5 * MIN, {"action": "run", "profile": "day_morning", "rule": 0})], 6 * MIN)
         self.assertEqual(w.kinds()[-1], t.EV_IGNORED)
         self.assertEqual(app.event_rows(1)[0]["msg"], "run ignored in RUNNING")
 
     def test_clear_manual_takes_over(self):
-        w = World("day")
+        w = World("day_morning")
         w.device.remote(t.ACState(True, t.MODE_COOL, 240, "2"))
         app = w.app()
         w.run(app, 2 * MIN)
@@ -459,15 +498,16 @@ class TestActions(unittest.TestCase):
         self.assertEqual(w.device.ac(), t.ACState(True, t.MODE_FAN, None, "2"))
 
     def test_switch_with_leave_hands_the_run_over(self):
-        w = World("day")
+        w = World("day_morning")
         app = w.app()
-        switch = {"action": "set_profile", "profile": "night", "cycle": "leave"}
+        switch = {"action": "set_profile", "profile": "night_evening", "cycle": "leave"}
         self.run_with(w, app, [(5 * MIN, switch)], 6 * MIN)
-        self.assertEqual((app.controller.state, app.controller.active, w.device.ac()), (t.MANUAL, "night", COOL))
+        got = (app.controller.state, app.controller.active, w.device.ac())
+        self.assertEqual(got, (t.MANUAL, "night_evening", COOL))
 
     def test_ac_test_during_a_write(self):
         # The test shares the client's lock: it waits for the write's exchange instead of racing it.
-        w = World("day")
+        w = World("day_morning")
         app = w.app()
         write = app.client.write
         replies = []
@@ -508,29 +548,29 @@ class TestActions(unittest.TestCase):
 
 class TestConfigSave(unittest.TestCase):
     def test_running_cycle_keeps_its_rule_and_the_next_one_uses_the_saved(self):
-        w = World("day")
+        w = World("day_morning")
         app = w.app(shadow=True)
         w.run(app, 5 * 60 * 1000)
         self.assertEqual(app.controller.state, t.RUNNING)
         status, body = app.save_profiles(day_short(config.default_profiles()))
         self.assertEqual((status, body), (200, {"ok": True, "warnings": []}))
-        self.assertEqual(app.controller.profiles, dict(config.default_profiles(), active="day"))  # not yet
+        self.assertEqual(app.controller.profiles, dict(config.default_profiles(), active="day_morning"))  # not yet
         w.run(app, 4 * 60 * 60 * 1000)
         starts, phases = event_times(w, t.EV_CYCLE_START), event_times(w, t.EV_PHASE)
         # The first cycle (humid, from 1:00) runs its 40 min cool phase; the next one (after the cooldown) 10 min.
         self.assertEqual(phases[0] - starts[0], 40 * 60 * 1000)
         second = [p for p in phases if p > starts[1]][0]
         self.assertEqual(second - starts[1], 10 * 60 * 1000)
-        self.assertEqual(app.controller.profiles["profiles"]["day"]["rules"][1]["phases"][0]["max_min"], 10)
-        self.assertEqual(w.store.load("profiles"), dict(day_short(config.default_profiles()), active="day"))
+        self.assertEqual(app.controller.profiles["profiles"]["day_morning"]["rules"][1]["phases"][0]["max_min"], 10)
+        self.assertEqual(w.store.load("profiles"), dict(day_short(config.default_profiles()), active="day_morning"))
 
     def test_saved_document_is_on_flash_at_once_and_logged(self):
-        w = World("day")
+        w = World("day_morning")
         app = w.app(shadow=True)
         app.save_settings(dict(config.default_settings(HOST), poll_s=120))
         app.save_profiles(day_short(config.default_profiles()))
         self.assertEqual(w.store.load("settings")["poll_s"], 120)
-        self.assertEqual(app.profiles_doc(), dict(day_short(config.default_profiles()), active="day"))
+        self.assertEqual(app.profiles_doc(), dict(day_short(config.default_profiles()), active="day_morning"))
         self.assertEqual(app.settings_doc()["poll_s"], 120)
         self.assertTrue(app.wake.is_set())
         saved = [(d["kind"], d["msg"]) for d in flash(w.store) if d["kind"] == t.EV_CONFIG_SAVED]
@@ -539,43 +579,44 @@ class TestConfigSave(unittest.TestCase):
         self.assertEqual((app.poll_ms(), app.pending), (120 * 1000, {}))
 
     def test_errors_save_nothing(self):
-        w = World("day")
+        w = World("day_morning")
         app = w.app(shadow=True)
         doc = config.default_profiles()
-        doc["profiles"]["day"]["rules"][0]["phases"][0]["target_c"] = 31
+        doc["profiles"]["day_morning"]["rules"][0]["phases"][0]["target_c"] = 31
         status, body = app.save_profiles(doc)
         self.assertEqual(status, 400)
-        self.assertEqual(body["errors"][0]["path"], "profiles.day.rules[0].phases[0].target_c")
+        self.assertEqual(body["errors"][0]["path"], "profiles.day_morning.rules[0].phases[0].target_c")
         status, body = app.save_settings(dict(config.default_settings(HOST), hard_cap_min=50))
         self.assertEqual((status, body["errors"][0]["path"]), (400, "hard_cap_min"))  # the humid rules need 60 min
         self.assertEqual((app.pending, w.store.load("settings")), ({}, None))
         self.assertEqual(w.store.load("profiles")["profiles"], config.default_profiles()["profiles"])
 
     def test_active_is_kept_and_cannot_be_deleted(self):
-        w = World("night")
+        w = World("away")
         app = w.app(shadow=True)
         doc = config.default_profiles()  # says "off"
         self.assertEqual(app.validate_profiles(doc)[0], 200)
-        self.assertEqual(doc["active"], "night")
-        del doc["profiles"]["night"]
+        self.assertEqual(doc["active"], "away")
+        del doc["profiles"]["away"]
         status, body = app.save_profiles(doc)
-        self.assertEqual((status, body["errors"]), (400, [{"path": "profiles.night",
+        self.assertEqual((status, body["errors"]), (400, [{"path": "profiles.away",
                                                            "msg": "the active profile; switch first"}]))
 
     def test_validate_does_not_save(self):
-        w = World("day")
+        w = World("day_morning")
         app = w.app(shadow=True)
         doc = day_short(config.default_profiles())
-        doc["profiles"]["day"]["rules"][1]["phases"].pop()
+        doc["profiles"]["day_morning"]["rules"][1]["phases"].pop()
         status, body = app.validate_profiles(doc)
-        self.assertEqual((status, [x["path"] for x in body["warnings"]]), (200, ["profiles.day.rules[1].phases"]))
+        got = (status, [x["path"] for x in body["warnings"]])
+        self.assertEqual(got, (200, ["profiles.day_morning.rules[1].phases"]))
         self.assertEqual((app.pending, app.warnings), ({}, []))
         self.assertEqual(w.store.load("profiles")["profiles"], config.default_profiles()["profiles"])
 
     def test_reset_with_a_custom_active_profile_switches_to_off(self):
         w = World()
         doc = config.default_profiles()
-        doc["profiles"]["mine"] = doc["profiles"]["day"]
+        doc["profiles"]["mine"] = doc["profiles"]["day_morning"]
         doc["active"] = "mine"
         w.store.save("profiles", doc)
         app = w.app(shadow=True)
@@ -592,7 +633,7 @@ class TestConfigSave(unittest.TestCase):
         # The reset lands while a tick awaits its read; that tick then persists its snapshot, still on "mine".
         w = World()
         doc = config.default_profiles()
-        doc["profiles"]["mine"] = doc["profiles"]["day"]
+        doc["profiles"]["mine"] = doc["profiles"]["day_morning"]
         doc["active"] = "mine"
         w.store.save("profiles", doc)
         app = w.app(shadow=True)
@@ -605,7 +646,7 @@ class TestConfigSave(unittest.TestCase):
         def full(name, doc):
             raise OSError(28)
 
-        w = World("day")
+        w = World("day_morning")
         app = w.app(shadow=True)
         w.run(app, 1000)
         app.wake.clear()
@@ -618,21 +659,21 @@ class TestConfigSave(unittest.TestCase):
         self.assertEqual([d for d in flash(w.store) if d["kind"] == t.EV_CONFIG_SAVED], [])
 
     def test_reset_keeps_a_default_active_profile(self):
-        w = World("night")
+        w = World("night_evening")
         app = w.app(shadow=True)
         doc = config.default_profiles()
-        doc["profiles"]["night"]["label"] = "Late"
+        doc["profiles"]["night_evening"]["label"] = "Late"
         app.save_profiles(doc)
         app.reset_profiles()
-        self.assertEqual(w.store.load("profiles"), dict(config.default_profiles(), active="night"))
+        self.assertEqual(w.store.load("profiles"), dict(config.default_profiles(), active="night_evening"))
 
     def test_switch_while_a_save_waits_keeps_the_saved_document(self):
         # A tick that switches the profile rewrites profiles.json: it must start from the saved document.
         w = World()
         app = w.app(shadow=True)
         app.save_profiles(day_short(config.default_profiles()))
-        app._persist(dict(app.controller._snapshot(app._now()), profile="day"))  # a tick already under way
-        self.assertEqual(w.store.load("profiles"), dict(day_short(config.default_profiles()), active="day"))
+        app._persist(dict(app.controller._snapshot(app._now()), profile="day_morning"))  # a tick already under way
+        self.assertEqual(w.store.load("profiles"), dict(day_short(config.default_profiles()), active="day_morning"))
 
     def test_shadow_keeps_the_owner_dry_run_in_the_file(self):
         w = World()
@@ -665,9 +706,9 @@ class TestConfigSave(unittest.TestCase):
         app = w.app(shadow=True)
         self.assertEqual([x["path"] for x in app.warnings], ["profiles"])
         doc = config.default_profiles()
-        doc["profiles"]["day"]["rules"][0]["phases"].pop()
+        doc["profiles"]["day_morning"]["rules"][0]["phases"].pop()
         app.save_profiles(doc)
-        self.assertEqual([x["path"] for x in app.warnings], ["profiles.profiles.day.rules[0].phases"])
+        self.assertEqual([x["path"] for x in app.warnings], ["profiles.profiles.day_morning.rules[0].phases"])
         app.save_profiles(config.default_profiles())
         self.assertEqual((app.warnings, app.status()["config_warning"]), ([], None))
 

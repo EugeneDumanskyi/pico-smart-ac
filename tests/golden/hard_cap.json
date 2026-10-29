@@ -1,7 +1,7 @@
 {
   "name": "hard_cap",
   "profiles": "default",
-  "active": "day",
+  "active": "day_morning",
   "settings": {"hard_cap_min": 40},
   "start_ms": 0,
   "snapshot": null,

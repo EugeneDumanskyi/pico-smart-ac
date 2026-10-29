@@ -18,6 +18,7 @@ import json
 from smartac.core.types import (
     EV_BLOCKED,
     EV_BOOT,
+    EV_CLOCK,
     EV_CONFIG_SAVED,
     EV_CYCLE_END,
     EV_CYCLE_START,
@@ -27,6 +28,7 @@ from smartac.core.types import (
     EV_PHASE,
     EV_PROFILE,
     EV_RESUME,
+    EV_STAGE,
     EV_TAKEOVER,
     EV_UNREACHABLE,
     EV_WOULD,
@@ -53,6 +55,8 @@ FLASH_KINDS = (
     EV_BLOCKED,
     EV_PAUSE,
     EV_RESUME,
+    EV_CLOCK,
+    EV_STAGE,
 )
 
 

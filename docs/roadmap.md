@@ -34,6 +34,7 @@ From the design review, 2026-10-08.
 | D5 | Pausing or switching profile during a cycle offers *finish* or *leave running* (any profile since M5). | [ADR 0003](decisions/0003-ac-ownership.md) |
 | D6 | `use` rule pointers dropped; profiles list their own rules. | [idea.md](idea.md#profilesjson) |
 | D7 | File-level OTA updates move to v1.1; v1.0 is updated over USB. | [ADR 0001](decisions/0001-language.md) |
+| D8 | Time of day from the AC (phone as backup) picks a schedule stage; a default stage runs while it is unknown. Durations stay relative. | [ADR 0006](decisions/0006-time-of-day.md) |
 
 ## M0: Spikes and skeleton
 

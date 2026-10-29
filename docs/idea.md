@@ -17,9 +17,10 @@ the contract; the same logic runs on the Mac against a simulator ([ADR 0002](dec
 - The owner switches the Pico on when at home (above all at night, when nobody can watch the AC) and may switch it
   off when leaving. Switching the Pico off mid-cycle is a normal event: the AC then simply stays under remote control.
 - It must also run unattended for days or weeks without drifting into a bad state.
-- **No wall clock.** The Pico never needs the date or time of day ([ADR 0004](decisions/0004-time.md)). Profiles are chosen
-  by hand (for example `night` at bedtime); every duration is relative: "cool for up to 30 min, then fan 20 min, then
-  wait 30 min".
+- **No wall clock for durations.** Every duration is relative ([ADR 0004](decisions/0004-time.md)): "cool for up to
+  30 min, then fan 20 min, then wait 30 min". Profiles are chosen by hand (for example `night` at bedtime). The time of
+  day, read from the AC, will only pick a stage of a schedule, with a default stage while it is unknown
+  ([ADR 0006](decisions/0006-time-of-day.md)).
 
 ## What we can rely on
 
@@ -62,7 +63,21 @@ This is our own mold-proof, and it's easy to stop.
 
 ## Profiles (defaults)
 
+`day` and `night` are schedules ([ADR 0006](decisions/0006-time-of-day.md)): each stage runs a rule profile from
+its start time until the next stage starts, and the last stage runs past midnight into the first. The ✓ stage runs
+while the time of day is unknown. A stage change never cuts a running cycle or cooldown. The stage values are first
+guesses, to be tuned from the logs.
+
 ### day
+| Stage | From | Profile | Change from `day_morning` |
+|---|---|---|---|
+| early morning | 06:00 | `day_early_morning` | fan 30 min (cooler: more air) |
+| morning ✓ | 09:00 | `day_morning` | — |
+| afternoon | 12:00 | `day_afternoon` | — (its own copy, to tune) |
+| hot afternoon | 13:30 | `day_hot_afternoon` | cooldown 5 min (the room warms up fast) |
+| evening | 17:00 | `day_evening` | fan 30 min |
+
+`day_morning`:
 | Rule | Trigger | Phases | Cooldown |
 |---|---|---|---|
 | too hot | temp > 29 | cool, target 26, **30 min or until temp ≤ 26**; then fan 20 min | 10 min |
@@ -73,10 +88,22 @@ run every dry cycle by day was overridden to cool by hand (see "Tuning" below). 
 it stays available for any phase.
 
 ### night
+| Stage | From | Profile | Change from `night_evening` |
+|---|---|---|---|
+| evening ✓ | 21:00 | `night_evening` | — |
+| early night | 23:00 | `night_early_night` | fan 25 min, cooldown 40 min |
+| midnight | 01:00 | `night_midnight` | fan 25 min, cooldown 40 min |
+| early morning | 04:00 | `night_early_morning` | fan 25 min, cooldown 45 min |
+| morning | 06:00 | `night_morning` | fan 25 min, cooldown 45 min (until 21:00) |
+
+`night_evening`:
 | Rule | Trigger | Phases | Cooldown |
 |---|---|---|---|
-| warm | temp > 27.5 | cool, target 25, **20 min or until temp ≤ 25**; then fan 15 min | 30 min |
+| warm | temp > 27 | cool, target 25, **20 min or until temp ≤ 25**; then fan 15 min | 30 min |
 | humid | humidity > 88 | cool, target 25.5, **25 min or until humidity ≤ 70**; then fan 15 min | 40 min |
+
+After 23:00 the fan runs longer, and the cooldown grows with it: with only a longer fan the room got back over the
+trigger within the cooldown and cycles ran back to back.
 
 ### away
 Nobody home for hours: now and then a short cool and a fan run move some air through a warm room.
@@ -243,6 +270,29 @@ warning on the page.
   the unit takes a relative offset (0 to −3.0 in 0.5 steps, set on the remote), which v1 leaves as the remote set it.
 - `min_interval_min`: minimum time between cycle starts of this rule (e.g. 240: at most one start every 4 h).
 
+A profile holds either `rules` or `stages`. One with `stages` is a **schedule**: each stage runs another profile's
+rules from its clock time until the next stage starts, and the last one runs past midnight into the first, so it
+repeats every day (ADR 0006).
+
+```json
+"night": {
+  "label": "Night",
+  "stages": [
+    {"from": "21:00", "profile": "night_evening", "default": true},
+    {"from": "23:00", "profile": "night_late"},
+    {"from": "04:00", "profile": "night_dawn"}
+  ]
+}
+```
+
+- `from`: `HH:MM`, local time. The list is in clock order from the first stage and may cross midnight once.
+- `profile`: a profile with `rules`, never another schedule. Such a profile can also be picked on its own.
+- `default`: exactly one stage has it. It runs while the Pico doesn't know the time of day.
+- A stage change never cuts a running cycle or its cooldown; the new stage's rules take the next trigger. Their
+  trigger counts (`confirm_reads`) start over, unless both stages run the same profile; `min_interval_min` holds
+  for a rule of the same name. Each change is a `stage` event: `2/5 day_morning (from 09:00)`, or
+  `(default, time unknown)`.
+
 ### `settings.json`
 
 ```json
@@ -274,7 +324,8 @@ warning on the page.
 | `confirm_reads` | 1–10 |
 | `min_interval_min` | 0–1440 |
 | `manual_hold_min`, `finish_fan_min` | 10–480, 0–60 |
-| phases per rule | 1–5; rules per profile 1–8; profiles ≤ 10 |
+| phases per rule | 1–5; rules per profile 1–8; profiles ≤ 20 |
+| stages | 1–8 per schedule; `from` 00:00–23:59 in clock order, crossing midnight at most once; one `default`; `profile` names a profile with rules |
 | names | `[a-z0-9_]{1,24}`, unique |
 | document size | ≤ 16 KB |
 | `until` | one condition or a list of 1–2; each must refer to a sensor that moves the right way for the mode (warning only) |
@@ -301,7 +352,7 @@ The Pico sends ages and durations in seconds; the page turns them into clock tim
   - **Pause 1 h / 2 h / 8 h / until resumed**, **Resume**. While a phase runs, pause and a profile switch ask:
     *finish* (default) or *leave running*.
   - **Run now**: pick a profile and a rule (with its plain-language summary) and start it immediately, skipping the
-    trigger.
+    trigger. Only profiles with rules are offered; under a schedule it starts on the current stage's profile.
   - **Stop**: finish with a fan phase, then off. **Stop now**: off immediately (with a confirm).
   - **Clear manual hold**.
   - Each button is enabled only in the states the controller accepts it in (Pause: not `PAUSED`; Resume: `PAUSED` or a
@@ -309,7 +360,11 @@ The Pico sends ages and durations in seconds; the page turns them into clock tim
     `MANUAL`, `TAKEOVER`; Stop now: `RUNNING`, `TAKEOVER`, `MANUAL` with the AC on; Clear: `MANUAL`). All are disabled
     in observe mode, and all but Pause until the first AC read after a boot. An action that still doesn't apply (the
     state changed meanwhile) shows its `ignored` event next to the buttons.
-- Errors: unreachable time, the last failed write, a config warning. Badges for shadow mode and dry run.
+- Errors: unreachable time, the last failed write, a config warning, the phone's clock more than 5 min from the
+  Pico's. Badges for shadow mode and dry run.
+- Stage, while a schedule is active: *n* of *m*, its profile and start time, or "default, time unknown".
+- Clock: the Pico's time of day and where it came from (the AC, or this phone). With a stored token the page sends
+  the phone's time (`POST /api/clock`) at once and every 15 min, every minute while the Pico's time is unknown.
 
 **Profiles** (editor)
 - List of profiles; each expands to its rules; each rule to its trigger and phases.
@@ -318,6 +373,9 @@ The Pico sends ages and durations in seconds; the page turns them into clock tim
   "When temp > 29 for 2 readings: cool to 26 for up to 30 min (stop early at ≤ 26), then fan 20 min, then off. Wait 10 min."
 - **Save** sends the whole document; **Revert** reloads it; **Restore defaults** (with confirm).
 - Duplicate a profile, rename, delete (not the active one); copy a rule from another profile.
+- A schedule (**+ schedule**) expands to its stages instead: a row each with the start time, the profile it runs
+  (one with rules), the default radio and up / down / remove, plus the time it runs until. Renaming a profile renames
+  it in the stages too; deleting one a schedule uses asks first, and Save then marks the stage.
 
 **History**
 - A 3 h / 12 h / 24 h toggle over stacked panels on one time axis (SVG, no library; labels on the phone's clock):
@@ -343,7 +401,7 @@ All bodies are JSON. Requests that change anything need the header `X-Token: <ap
 (the page asks for it once and keeps it in `localStorage`). GETs are open on the LAN.
 No CORS headers are ever sent, so a custom header also blocks cross-site requests from other pages.
 Large responses (`/api/history`, the UI files) are streamed in chunks. Times are relative: `*_s` fields are seconds
-(left, or ago); nothing in the API is a wall-clock time.
+(left, or ago); the only wall-clock times are `clock` in `/api/state` and `POST /api/clock` (ADR 0006).
 
 | Method & path | Body / query | Returns |
 |---|---|---|
@@ -360,6 +418,7 @@ Large responses (`/api/history`, the UI files) are streamed in chunks. Times are
 | `PUT /api/settings` | whole document | as PUT profiles |
 | `POST /api/active` | `{"profile": "away", "cycle": "finish"}` (`cycle`: `finish` or `leave`, used only if a cycle runs; default `finish`) | 202 and the state; the next tick applies it. 401 without the right token (always, if `API_TOKEN` is unset), 400 for an unknown profile or `cycle`, 503 if the action queue is full |
 | `POST /api/action` | `{"action": "pause", "minutes": 120, "cycle": "finish"}` (`minutes` 1–480, or null = until resumed; `cycle` as above), `{"action": "resume"}`, `{"action": "run", "profile": "day", "rule": 0}` (`rule`: index in the profile), `{"action": "stop"}`, `{"action": "stop_now"}`, `{"action": "clear_manual"}` | 202 and the state; the next tick applies it, and one that doesn't apply in that state becomes an `ignored` event. 401 as above, 400 for an unknown action or a bad field, 409 in observe mode, 503 if the action queue is full |
+| `POST /api/clock` | `{"time": "2026-10-28T14:05:09Z"}` (the phone's local time; the `Z` is only part of the format, as in the AC's `last_ope.time`) | 200 `{"time": "14:05", "source": "phone", "phone_s": 0}`. Sets the clock only until the AC has (ADR 0006); otherwise compared only. `phone_s`: the phone's clock minus the Pico's, null while the time is unknown. A difference under 60 s changes nothing. 401 as above, 400 for a time that doesn't parse or is before 2024 |
 | `POST /api/ac/test` | `{"ip": "192.0.2.10"}` (optional; default the address in use) | 200 `{"reachable": true, "ip": "192.0.2.10", "fw": "3.6.0", "type": "RA", "comm_err": 0, "ms": 140}` or `{"reachable": false, "ip": ..., "error": "timeout"}`; read-only on the AC. 401 as above, 400 for an address that isn't IPv4, 503 while another test runs |
 
 Config documents (`/api/profiles`, `/api/settings`):
@@ -381,30 +440,35 @@ Config documents (`/api/profiles`, `/api/settings`):
 {
   "state": "RUNNING",
   "profile": "day",
+  "stage": {"n": 4, "of": 5, "from": "13:30", "profile": "day_hot_afternoon", "default": false,
+            "time_unknown": false},
   "cycle": {"rule": "humid", "phase": 1, "phases": 2, "mode": "dry",
             "phase_left_s": 2400, "goal": "hum <= 65", "running_s": 1800},
   "cooldown_left_s": null, "manual_left_s": null, "paused_left_s": null,
   "room": {"temp": 28, "hum": 81}, "outdoor_temp": 31.5,
   "ac": {"reachable": true, "power": true, "mode": "dry", "target_c": null, "fan": "auto"},
+  "clock": {"time": "14:05", "source": "ac", "phone_s": 4},
   "dry_run": false,
   "poll_s": 60,
   "shadow": false,
-  "profiles": [{"name": "away", "label": "Away", "rules": ["warm"]},
-               {"name": "day", "label": "Day", "rules": ["too_hot", "humid"]},
-               {"name": "night", "label": "Night", "rules": ["warm", "humid"]}],
+  "profiles": [{"name": "away", "label": "Away", "rules": ["warm"], "schedule": false},
+               {"name": "day", "label": "Day", "rules": [], "schedule": true},
+               {"name": "day_hot_afternoon", "label": "Day hot afternoon", "rules": ["too_hot", "humid"],
+                "schedule": false}],
   "last_error": null,
   "config_warning": null,
   "device": {"uptime_s": 86400, "boot": 7, "heap_free": 150000, "heap_max_block": 90000, "rssi": -60,
              "wifi_reconnects": 0, "reset_cause": "watchdog", "log_errors": 0}
 }
 ```
-`device.log_errors` counts the event lines the flash refused (full) since boot; the board runs on without them. A boot
+`stage` is null unless the active profile is a schedule (`time_unknown`: the default stage runs for want of a
+clock). A schedule in `profiles` has no rules of its own; Run now offers only the profiles with rules. `device.log_errors` counts the event lines the flash refused (full) since boot; the board runs on without them. A boot
 counter it can't save shows as the config warning `boot: flash write failed, counters not saved`.
 
 ### History storage
 - Ring buffer in RAM: 1440 one-minute samples × 5 values ≈ 10 KB. Lost on reboot (acceptable).
 - Events: last ~200 in RAM. The decisions (cycle start and end, phases, `would`, hard cap, profile switches,
-  pause and resume, overrides, takeovers, unreachable, failed or blocked writes, config saves, reboots) are also
+  stage changes, clock syncs, pause and resume, overrides, takeovers, unreachable, failed or blocked writes, config saves, reboots) are also
   appended to a small rotating file on flash with the boot number, in every mode: ≤ 150 lines a day, so flash wear
   doesn't matter, and the History tab still has them after a reboot.
 
@@ -431,7 +495,11 @@ would have done, without writing. Every `would` was checked against the room his
   `humid` starts at > 88 % and cools to 25.5 °C for up to 25 min or until 70 %, then waits 40 min. `away` no longer
   dries every 4 h: above 28.5 °C it cools 10 min and runs the fan 20 min, then waits 45 min, to move some air.
 - Event times are approximate when nobody is in the room: a trigger can fire with no one there to react.
-- Not changed: profiles are still chosen by hand (ADR 0004). Forgetting to switch profile in the morning happened;
+- **Time of day** (2026-10-28): one set of values all day was too cold in the morning and too slow in the hot
+  afternoon, and at night the late hours needed a longer fan. `day` and `night` became schedules of stage profiles
+  (see "Profiles"); night `warm` starts at > 27 °C. The outdoor reading can't pick the stage: the outdoor unit reads
+  its own exhaust while it runs.
+- Not changed: profiles are still chosen by hand (ADR 0004); a schedule only picks the stage by the clock. Forgetting to switch profile in the morning happened;
   a relative "night for 8 h, then day" timer is in "Later ideas" ("Profile timer").
 
 ## Later ideas (not in v1)

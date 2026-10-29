@@ -24,17 +24,44 @@ def summary(rule):
     return (rule["name"], (c["sensor"], c["op"], c["value"]), phases, rule["cooldown_min"], rule["min_interval_min"])
 
 
+def fan_and_cooldown(name):
+    return [(r["phases"][-1]["max_min"], r["cooldown_min"]) for r in rules_of(name)]
+
+
 class TestDefaultProfiles(unittest.TestCase):
     def test_top_level(self):
         doc = config.default_profiles()
         self.assertEqual(doc["version"], 1)
         self.assertEqual(doc["active"], config.OFF)
-        self.assertEqual(sorted(doc["profiles"]), ["away", "day", "night"])
+        self.assertEqual(
+            sorted(doc["profiles"]),
+            ["away", "day", "day_afternoon", "day_early_morning", "day_evening", "day_hot_afternoon", "day_morning",
+             "night", "night_early_morning", "night_early_night", "night_evening", "night_midnight", "night_morning"],
+        )
         self.assertFalse(config.OFF in doc["profiles"])
+        self.assertEqual(config.validate_profiles(doc), ([], []))
+
+    def test_schedules(self):
+        doc = config.default_profiles()["profiles"]
+
+        def stages(name):
+            return [(st["from"], st["profile"], st.get("default", False)) for st in doc[name]["stages"]]
+
+        self.assertEqual(
+            stages("day"),
+            [("06:00", "day_early_morning", False), ("09:00", "day_morning", True), ("12:00", "day_afternoon", False),
+             ("13:30", "day_hot_afternoon", False), ("17:00", "day_evening", False)],
+        )
+        self.assertEqual(
+            stages("night"),
+            [("21:00", "night_evening", True), ("23:00", "night_early_night", False),
+             ("01:00", "night_midnight", False), ("04:00", "night_early_morning", False),
+             ("06:00", "night_morning", False)],
+        )
 
     def test_day(self):
         self.assertEqual(
-            [summary(r) for r in rules_of("day")],
+            [summary(r) for r in rules_of("day_morning")],
             [
                 (
                     "too_hot",
@@ -53,13 +80,28 @@ class TestDefaultProfiles(unittest.TestCase):
             ],
         )
 
+    def test_day_stages_differ_only_in_fan_and_cooldown(self):
+        def rest(name):
+            out = []
+            for r in rules_of(name):
+                s = summary(r)
+                out.append((s[0], s[1], s[2][:-1], s[2][-1][:3], s[2][-1][4:], s[4]))  # all but fan max_min, cooldown
+            return out
+
+        for name in ("day_early_morning", "day_afternoon", "day_hot_afternoon", "day_evening"):
+            self.assertEqual(rest(name), rest("day_morning"), name)
+        self.assertEqual(fan_and_cooldown("day_early_morning"), [(30, 10), (30, 10)])
+        self.assertEqual(fan_and_cooldown("day_afternoon"), [(20, 10), (20, 10)])
+        self.assertEqual(fan_and_cooldown("day_hot_afternoon"), [(20, 5), (20, 5)])
+        self.assertEqual(fan_and_cooldown("day_evening"), [(30, 10), (30, 10)])
+
     def test_night(self):
         self.assertEqual(
-            [summary(r) for r in rules_of("night")],
+            [summary(r) for r in rules_of("night_evening")],
             [
                 (
                     "warm",
-                    ("temp", ">", 27.5),
+                    ("temp", ">", 27),
                     [("cool", 25, "3", 20, [("temp", "<=", 25)]), ("fan", None, "3", 15, [])],
                     30,
                     0,
@@ -74,6 +116,18 @@ class TestDefaultProfiles(unittest.TestCase):
             ],
         )
 
+    def test_night_stages(self):
+        for name in ("night_early_night", "night_midnight"):
+            self.assertEqual(fan_and_cooldown(name), [(25, 40), (25, 40)], name)
+        for name in ("night_early_morning", "night_morning"):
+            self.assertEqual(fan_and_cooldown(name), [(25, 45), (25, 45)], name)
+        for name in ("night_early_night", "night_midnight", "night_early_morning", "night_morning"):
+            self.assertEqual(
+                [summary(r)[:2] + (summary(r)[2][0],) for r in rules_of(name)],
+                [summary(r)[:2] + (summary(r)[2][0],) for r in rules_of("night_evening")],
+                name,
+            )
+
     def test_away(self):
         self.assertEqual(
             [summary(r) for r in rules_of("away")],
@@ -82,10 +136,12 @@ class TestDefaultProfiles(unittest.TestCase):
 
     def test_fresh_copy_each_call(self):
         a = config.default_profiles()
-        a["profiles"]["day"]["rules"][0]["phases"][0]["max_min"] = 99
+        a["profiles"]["day_morning"]["rules"][0]["phases"][0]["max_min"] = 99
+        a["profiles"]["day"]["stages"][0]["from"] = "05:00"
         a["active"] = "day"
         b = config.default_profiles()
-        self.assertEqual(b["profiles"]["day"]["rules"][0]["phases"][0]["max_min"], 30)
+        self.assertEqual(b["profiles"]["day_morning"]["rules"][0]["phases"][0]["max_min"], 30)
+        self.assertEqual(b["profiles"]["day"]["stages"][0]["from"], "06:00")
         self.assertEqual(b["active"], config.OFF)
 
     def test_json_round_trip(self):
@@ -99,8 +155,10 @@ class TestDefaultsWithinLimits(unittest.TestCase):
     def test_every_rule(self):
         settings = config.default_settings()
         doc = config.default_profiles()
-        self.assertLessEqual(len(doc["profiles"]), 10)
+        self.assertLessEqual(len(doc["profiles"]), config.MAX_PROFILES)
         for pname, profile in doc["profiles"].items():
+            if "stages" in profile:
+                continue  # checked in TestDefaultProfiles.test_schedules
             rules = profile["rules"]
             self.assertTrue(1 <= len(rules) <= 8, pname)
             self.assertTrue(all(ch in NAME_CHARS for ch in pname))

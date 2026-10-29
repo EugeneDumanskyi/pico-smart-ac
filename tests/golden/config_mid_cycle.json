@@ -1,7 +1,7 @@
 {
   "name": "config_mid_cycle",
   "profiles": "default",
-  "active": "day",
+  "active": "day_morning",
   "settings": {},
   "start_ms": 0,
   "snapshot": null,
@@ -11,7 +11,7 @@
     {"t_s": 65, "readback": true, "ac": [true, "cool", 26, "3"], "expect": {"cmds": [["persist"]]}},
     {"t_s": 120, "temp": 29, "expect": {"state": "RUNNING"}, "configure": {
       "settings": {"dry_run": true, "hard_cap_min": 40},
-      "profiles": {"version": 1, "active": "day", "profiles": {"day": {"label": "Day", "rules": [
+      "profiles": {"version": 1, "active": "day_morning", "profiles": {"day_morning": {"label": "Day morning", "rules": [
         {"name": "too_hot", "when": {"match": "all", "conditions": [{"sensor": "temp", "op": ">", "value": 29}]},
          "confirm_reads": 2, "cooldown_min": 5, "min_interval_min": 0,
          "phases": [{"mode": "cool", "fan": "auto", "max_min": 10, "until": {"sensor": "temp", "op": "<=", "value": 26}, "target_c": 26},

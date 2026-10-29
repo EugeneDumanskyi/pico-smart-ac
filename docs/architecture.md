@@ -12,7 +12,8 @@ the plan is in [roadmap.md](roadmap.md). Decisions: [decisions/](decisions/).
 - **Remote wins** ([ADR 0003](decisions/0003-ac-ownership.md)). Automation only changes or switches off an AC state it
   set itself and still sees unchanged.
 - **Fail towards "off and hands off"**: on doubt, finish our own cycle and stop; never start one.
-- **Relative time only** ([ADR 0004](decisions/0004-time.md)): monotonic ticks for every duration; no NTP, no wall clock.
+- **Relative time only** ([ADR 0004](decisions/0004-time.md)): monotonic ticks for every duration; no NTP. The time of
+  day comes from the AC and only picks a schedule stage ([ADR 0006](decisions/0006-time-of-day.md)).
 
 ## Modules
 
@@ -24,6 +25,7 @@ the plan is in [roadmap.md](roadmap.md). Decisions: [decisions/](decisions/).
 | `core/rules.py` | core | condition evaluation, first-match rule selection, `confirm_reads` counting, `min_interval` |
 | `core/controller.py` | core | state machine: `step(now, reading, actions) → commands`; owns cycle, stopping, cooldown, manual hold, takeover, pause |
 | `core/history.py` | core | 1440 × 1-min ring buffer in preallocated `array`s; streamed JSON export |
+| `core/clock.py` | core | time of day from the AC's `last_ope.time` (phone as backup), distrusts jumps; picks stages only (ADR 0006) |
 | `core/events.py` | core | event ring (200), each event with the reading it was decided on; marks which events go to flash and owns the `events.log` line format |
 | `shell/daikin.py` | shell | async HTTP POST to `/dsiot/multireq`, hard timeout, one request at a time (a lock: the Settings tab's AC test on the address in use waits for the control task's read or write), IPv4 literal only (no DNS); never raises |
 | `shell/store.py` | shell | one API, two stores: `MemoryStore` (documents kept as JSON text) on the host, `FileStore` on flash (atomic `.tmp` → rename with `.bak`, rotating event log read back in 512-byte pieces, crash log, boot and reset counters) |

@@ -10,9 +10,13 @@
 #   ("ignore_writes", n)       the next n valid writes get rsc 2004 but are not applied
 #   ("set_room", {"temp": ..., "hum": ..., "outdoor": ...})   jump the room model
 # The same are methods for direct use in tests.
+#
+# wall: local wall seconds (core/clock.py) at creation. With it, reads carry last_ope, whose time moves on each
+# remote press and applied write, like the real unit; without it there is no last_ope.
 import time
 
 from sim.room import Room
+from smartac.core import clock as wallclock
 from smartac.core import daikin_codec as codec
 from smartac.core.types import MODE_UNKNOWN, ACState
 
@@ -77,8 +81,10 @@ def _valid(group, param, pv):
 
 
 class FakeDaikin:
-    def __init__(self, clock, room=None, script=None):
+    def __init__(self, clock, room=None, script=None, wall=None):
         self.clock = clock
+        self.wall = wall
+        self.op_wall = wall
         self.room = room or Room()
         self.start = clock()
         self.now = self.start  # clock time the room and script have caught up to
@@ -147,9 +153,14 @@ class FakeDaikin:
         self.sync()
         self.room.set(temp, hum, outdoor)
 
+    def _operated(self):
+        if self.wall is not None:
+            self.op_wall = self.wall + time.ticks_diff(self.now, self.start) // 1000
+
     def _remote(self, ac):
         if ac.mode not in codec.MODE_VALUES:
             raise ValueError("remote can't set mode %r" % (ac.mode,))
+        self._operated()
         self.power = "01" if ac.power else "00"
         self.e3001["p_01"] = codec.MODE_VALUES[ac.mode]
         if ac.target is not None and ac.mode in codec.SETPOINT_PARAM:
@@ -198,7 +209,25 @@ class FakeDaikin:
             root = self._outdoor()
         else:
             return {"fr": path, "rsc": codec.RSC_REJECTED}
-        return {"fr": path, "pc": {"pn": "dgc_status", "pch": [root]}, "rsc": codec.RSC_READ_OK}
+        pch = [root]
+        if path == codec.INDOOR and self.op_wall is not None:
+            pch.insert(0, self._last_ope())
+        return {"fr": path, "pc": {"pn": "dgc_status", "pch": pch}, "rsc": codec.RSC_READ_OK}
+
+    def _last_ope(self):
+        w = self.op_wall
+        n = w // wallclock.DAY_S
+        # days -> date: count up from 2000 (sim only, a few thousand days at most).
+        y = 2000
+        while wallclock.days(y + 1, 1, 1) <= n:
+            y += 1
+        m = 1
+        while m < 12 and wallclock.days(y, m + 1, 1) <= n:
+            m += 1
+        d = n - wallclock.days(y, m, 1) + 1
+        text = "%04d-%02d-%02dT%sZ" % (y, m, d, wallclock.hms(w))
+        return {"pn": "last_ope", "pt": 1, "pch": [{"pn": "type", "pt": 3, "pv": 100}, {"pn": "time", "pt": 3,
+                                                                                    "pv": text}]}
 
     def _indoor(self):
         s = self.room.sensors()
@@ -241,5 +270,6 @@ class FakeDaikin:
                 self.power = pv
             else:
                 self.e3001[param] = pv
+        self._operated()
         return codec.RSC_WRITE_OK
 

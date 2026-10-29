@@ -4,8 +4,8 @@
      the profile dropdown sends POST /api/active, the buttons POST /api/action. A button is enabled only in the states
      the controller accepts it in; one that still doesn't apply shows its `ignored` event. The Profiles and Settings
      forms are in editor.js, which uses the helpers below ($, rows, store, api) and the "state" event and gives back
-     window.ruleSummary. The History tab is history.js, on the same helpers. tools/build_web.py gzips the files for
-     the Pico. -->
+     window.ruleSummary. The History tab is history.js, on the same helpers. With a stored token the page sends the
+     phone's time, the Pico's clock until the AC sets it (ADR 0006). tools/build_web.py gzips the files for the Pico. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -323,16 +323,18 @@ async function pause(minutes) {
 const act = (action, extra) => send("/api/action", Object.assign({ action }, extra));
 
 function renderRun(s) {
-  const p = $("run-profile"), r = $("run-rule");
-  const key = s.profiles.map((x) => x.name + ":" + x.rules.join(",")).join(";");
+  // Profiles with rules only; under a schedule the current stage's profile is the one followed.
+  const p = $("run-profile"), list = s.profiles.filter((x) => !x.schedule);
+  const now = s.stage ? s.stage.profile : s.profile, has = list.some((x) => x.name === now);
+  const key = list.map((x) => x.name + ":" + x.rules.join(",")).join(";");
   if (p.dataset.key !== key) {
-    p.replaceChildren(...s.profiles.map((x) => new Option(x.label, x.name)));
+    p.replaceChildren(...list.map((x) => new Option(x.label, x.name)));
     p.dataset.key = key;
-    p.value = s.profiles.some((x) => x.name === s.profile) ? s.profile : (s.profiles[0] || {}).name;
+    p.value = has ? now : (list[0] || {}).name;
     p.dataset.picked = "";
     fillRules();
-  } else if (!p.dataset.picked && s.profiles.some((x) => x.name === s.profile) && p.value !== s.profile) {
-    p.value = s.profile;  // follows the active profile until the owner picks one
+  } else if (!p.dataset.picked && has && p.value !== now) {
+    p.value = now;  // follows the active profile (or stage) until the owner picks one
     fillRules();
   }
 }
@@ -385,6 +387,29 @@ function acText(s) {
     + (ac.fan ? ", fan " + ac.fan : "");
 }
 
+const gap = (s) => (s < 0 ? "-" : "+") + (Math.abs(s) < 120 ? Math.abs(s) + " s" : Math.round(Math.abs(s) / 60) + " min");
+
+function stageText(st) {
+  return st.n + "/" + st.of + " " + st.profile + (st.time_unknown ? ", default: time unknown" : ", from " + st.from);
+}
+
+function clockText(c) {
+  if (c.time == null) return "unknown until the AC is next operated";
+  const off = Math.abs(c.phone_s ?? 0) >= 60 ? ", this phone " + gap(c.phone_s) : "";
+  return c.time + " from " + (c.source === "ac" ? "the AC" : "a phone") + off;
+}
+
+let synced = 0;  // Date.now() of the last POST /api/clock
+async function syncClock(s) {
+  // The phone's local time, in the AC's format: the Pico's clock until the AC sets it, then a check.
+  if (!store(true) || Date.now() - synced < (s.clock.time == null ? 60e3 : 15 * 60e3)) return;
+  synced = Date.now();
+  const d = new Date(), p = (n) => String(n).padStart(2, "0");
+  const time = d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T" + p(d.getHours()) + ":"
+    + p(d.getMinutes()) + ":" + p(d.getSeconds()) + "Z";
+  try { await api("POST", "/api/clock", { time }, false); } catch (e) { /* tried again next time */ }
+}
+
 function render(s) {
   const d = s.device;
   last = s;
@@ -406,9 +431,12 @@ function render(s) {
       ? "AC not reachable for " + dur(s.unreachable_s) + (s.last_error ? " (" + s.last_error + ")" : "") : "",
     s.last_write_error ? "last write: " + s.last_write_error : "",
     s.config_warning || "",
+    Math.abs(s.clock.phone_s ?? 0) > 300 ? "this phone's clock is " + gap(s.clock.phone_s) + " from the Pico's" : "",
   ].filter(Boolean).join(" · ");
   rows($("rows"), [
     ["AC", acText(s)],
+    ...(s.stage ? [["stage", stageText(s.stage)]] : []),
+    ["clock", clockText(s.clock)],
     ["reads", s.reads + " (" + s.read_errors + " failed), writes " + s.writes + " (" + s.write_errors + " failed)"],
   ]);
   const resets = Object.entries(d.resets || {}).map(([k, v]) => k + " " + v).join(", ");
@@ -447,7 +475,9 @@ async function poll() {
   try {
     const r = await fetch("/api/state", { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
-    render(await r.json());
+    const s = await r.json();
+    render(s);
+    syncClock(s);
     const e = await fetch("/api/events?limit=15", { cache: "no-store" });
     if (e.ok) renderEvents(await e.json());
   } catch (e) {

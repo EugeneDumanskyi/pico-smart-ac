@@ -1,7 +1,7 @@
 {
   "name": "dry_run",
   "profiles": "default",
-  "active": "day",
+  "active": "day_morning",
   "settings": {"dry_run": true},
   "start_ms": 0,
   "snapshot": null,

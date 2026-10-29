@@ -25,6 +25,7 @@ from sim.clock import MIN_MS, FakeClock  # noqa: E402
 from sim.device import FakeDaikin  # noqa: E402
 from sim.server import DEFAULT_PORT, serve  # noqa: E402
 from smartac.board.host import HostBoard  # noqa: E402
+from smartac.core import clock as wallclock  # noqa: E402
 from smartac.core import config  # noqa: E402
 from smartac.core.config import OFF  # noqa: E402
 from smartac.core.controller import CYCLING, OWNED  # noqa: E402
@@ -42,6 +43,7 @@ from smartac.core.types import (  # noqa: E402
     EV_CYCLE_START,
     EV_HARD_CAP,
     EV_MANUAL,
+    EV_STAGE,
     EV_TAKEOVER,
     EV_UNREACHABLE,
     EV_WRITE_FAILED,
@@ -69,6 +71,7 @@ COVERAGE = (
     "reboots_mid_write",
     "outages",
     "wraps",
+    "stages",
 )
 MANUAL_EXITS = (ACT_STOP, ACT_STOP_NOW, ACT_CLEAR_MANUAL, ACT_PAUSE, ACT_SET_PROFILE)
 HANDOFFS = (EV_CYCLE_END, EV_MANUAL, EV_WRITE_FAILED)
@@ -167,7 +170,7 @@ class Monitor:
         self.hold_ms = s["manual_hold_min"] * MIN_MS
         self.release_ms = s["manual_release_off_min"] * MIN_MS
         profiles = config.default_profiles()["profiles"]
-        self.max_cooldown = max(r["cooldown_min"] for p in profiles.values() for r in p["rules"])
+        self.max_cooldown = max(r["cooldown_min"] for p in profiles.values() for r in p.get("rules", ()))
         self.counts = {k: 0 for k in COVERAGE}
         self.counts.update({"reboots": 0, "writes": 0, "ignored": 0, "lost_actions": 0})
         self.recent = []
@@ -258,7 +261,7 @@ class Monitor:
         leave = any(a.get("cycle") == "leave" for a in effective if a.get("action") in (ACT_PAUSE, ACT_SET_PROFILE))
         self.counts["ignored"] += kinds.count("ignored")
         for k, name in ((EV_CYCLE_START, "cycles"), (EV_TAKEOVER, "takeovers"), (EV_WRITE_FAILED, "write_failed"),
-                        (EV_HARD_CAP, "hard_caps"), (EV_UNREACHABLE, "outages")):
+                        (EV_HARD_CAP, "hard_caps"), (EV_UNREACHABLE, "outages"), (EV_STAGE, "stages")):
             self.counts[name] += kinds.count(k)
 
         # 7: never mistake our own write for a human, never write over a state we didn't set.
@@ -435,7 +438,9 @@ class Harness:
         self.clock = FakeClock(time.ticks_add(0, -DAY_MS))  # the world crosses the wrap on day 1 too
         self.sched = Scheduler(self.clock)
         self.sched.on_wake = self._wake
-        self.device = FakeDaikin(self.clock, script=self.scenario.script)
+        # The AC's clock: the run starts at 00:00, so the Day and Night schedules go through their stages.
+        wall = wallclock.days(2026, 1, 1) * wallclock.DAY_S
+        self.device = FakeDaikin(self.clock, script=self.scenario.script, wall=wall)
         self.store = MemoryStore()
         self.monitor = Monitor(self)
         self.app = None

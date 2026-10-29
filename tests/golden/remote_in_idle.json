@@ -1,7 +1,7 @@
 {
   "name": "remote_in_idle",
   "profiles": "default",
-  "active": "day",
+  "active": "day_morning",
   "settings": {"manual_hold_min": 60, "manual_release_off_min": 10},
   "start_ms": 0,
   "snapshot": null,

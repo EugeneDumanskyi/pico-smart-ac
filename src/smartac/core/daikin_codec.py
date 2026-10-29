@@ -128,11 +128,11 @@ def _in_range(value, limits):
 
 
 def _find_roots(response):
-    # -> (indoor e_1002 node, outdoor e_1003 node, error). Roots are found by name in any
+    # -> (indoor e_1002 node, outdoor e_1003 node, last_ope node, error). Roots are found by name in any
     # response that read OK, so the order of responses doesn't matter.
     if not isinstance(response, dict) or not isinstance(response.get("responses"), list):
-        return None, None, "malformed response"
-    indoor = outdoor = None
+        return None, None, None, "malformed response"
+    indoor = outdoor = last = None
     error = None
     for r in response["responses"]:
         if not isinstance(r, dict):
@@ -142,16 +142,27 @@ def _find_roots(response):
             error = "rsc %s" % rsc
             continue
         pc = r.get("pc")
-        indoor = indoor or _child(pc, "e_1002")
+        found = _child(pc, "e_1002")
+        if found is not None and indoor is None:
+            indoor, last = found, _child(pc, "last_ope")  # last_ope sits next to the indoor e_1002
         outdoor = outdoor or _child(pc, "e_1003")
-    return indoor, outdoor, error
+    return indoor, outdoor, last, error
+
+
+def _last_op(node):
+    # last_ope -> (time text, type) for core/clock.py, or None if there is no time string.
+    text = _pv(node, "time")
+    if not isinstance(text, str):
+        return None
+    kind = _pv(node, "type")
+    return text[:24], kind if isinstance(kind, int) and not isinstance(kind, bool) else None
 
 
 def decode(response, limits=None):
     # Parsed /dsiot/multireq response for READ_REQUEST -> Reading. Never raises: a response
     # without usable indoor power/mode is unreachable; a missing or out-of-range sensor is None.
     # limits: settings sensor_limits ({"temp": [lo, hi], "hum": [lo, hi]}, degrees C / percent).
-    indoor, outdoor, error = _find_roots(response)
+    indoor, outdoor, last, error = _find_roots(response)
     if indoor is None:
         return Reading.unreachable(error or "no indoor data")
 
@@ -191,7 +202,7 @@ def decode(response, limits=None):
     if outdoor is not None:
         out = _int(outdoor, ("e_A00D", "p_01"), signed=True)
         out = _in_range(None if out is None else out * 5, (tenths(OUTDOOR_LIMITS[0]), tenths(OUTDOOR_LIMITS[1])))
-    return Reading(ac, temp=temp, hum=hum, outdoor_temp=out)
+    return Reading(ac, temp=temp, hum=hum, outdoor_temp=out, last_op=_last_op(last))
 
 
 def parse_info(response):

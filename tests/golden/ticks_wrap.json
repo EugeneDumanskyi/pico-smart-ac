@@ -1,7 +1,7 @@
 {
   "name": "ticks_wrap",
   "profiles": "default",
-  "active": "day",
+  "active": "day_morning",
   "settings": {},
   "start_ms": -900000,
   "snapshot": null,
