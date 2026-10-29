@@ -10,6 +10,7 @@
 # after the token check, one at a time (a parsed 16 KB document takes ~90 KB of heap). Larger than
 # max_content_length -> 413 before any route runs.
 import asyncio
+import gc
 import json
 import os
 import sys
@@ -55,6 +56,9 @@ class _Server(Microdot):
             await writer.wait_closed()
         except OSError:
             pass
+        # The body and the reply (a few KB each) go now, before the next tick's small objects settle between them
+        # and split the heap: a soak saw the largest block fall below LOW_BLOCK after an evening of profile edits.
+        gc.collect()
 
 
 def _asset(req, path):
@@ -139,7 +143,7 @@ async def _read_json(req):
             data = await req.stream.readexactly(req.content_length)
         else:
             data = req.body
-        return json.loads(data.decode()), None
+        return json.loads(data), None  # bytes as they are: a decoded copy is one more large block
     except (EOFError, ValueError):  # UnicodeError is a ValueError
         return None, "body must be a JSON document"
 

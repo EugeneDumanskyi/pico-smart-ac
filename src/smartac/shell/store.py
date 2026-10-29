@@ -132,7 +132,7 @@ class FileStore(_Store):
         path = self._path(name)
         try:
             with open(path + ".tmp", "w") as f:
-                f.write(json.dumps(doc))
+                json.dump(doc, f)  # streamed: no copy of the whole document as one string
         except OSError:
             # Flash full: no half-written .tmp left behind, and name.json as it was.
             _remove(path + ".tmp")

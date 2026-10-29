@@ -54,11 +54,11 @@ class TestRing(unittest.TestCase):
 
 class TestFlash(unittest.TestCase):
     def test_kinds(self):
-        # The decisions go to flash in every mode; ignored actions and low_memory stay in RAM.
+        # The decisions go to flash in every mode; ignored actions stay in RAM.
         flash = (t.EV_CYCLE_END, t.EV_MANUAL, t.EV_TAKEOVER, t.EV_WRITE_FAILED, t.EV_CONFIG_SAVED, t.EV_BOOT,
                  t.EV_CYCLE_START, t.EV_PHASE, t.EV_WOULD, t.EV_HARD_CAP, t.EV_PROFILE, t.EV_UNREACHABLE,
-                 t.EV_BLOCKED, t.EV_PAUSE, t.EV_RESUME)
-        ram = (t.EV_IGNORED, t.EV_LOW_MEMORY)
+                 t.EV_BLOCKED, t.EV_PAUSE, t.EV_RESUME, t.EV_LOW_MEMORY)
+        ram = (t.EV_IGNORED,)
         log = e.EventLog(boot=1)
         for kind in flash:
             self.assertTrue(e.to_flash(kind), kind)

@@ -23,6 +23,7 @@ from smartac.core.types import (
     EV_CYCLE_END,
     EV_CYCLE_START,
     EV_HARD_CAP,
+    EV_LOW_MEMORY,
     EV_MANUAL,
     EV_PAUSE,
     EV_PHASE,
@@ -57,6 +58,7 @@ FLASH_KINDS = (
     EV_RESUME,
     EV_CLOCK,
     EV_STAGE,
+    EV_LOW_MEMORY,  # one line per low spell: the soak needs it after a power-off
 )
 
 

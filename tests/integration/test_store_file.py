@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # FileStore on the Unix port: in a temporary directory (VfsPosix), and on littlefs in RAM, the Pico's file system.
+import io
 import json
 import os
 import unittest
@@ -88,7 +89,7 @@ def _cut_open(path, mode="r"):
     if "w" not in mode:
         return f
 
-    class Half:
+    class Half(io.IOBase):  # a stream, so json.dump writes into it
         def __enter__(self):
             return self
 

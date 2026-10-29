@@ -56,7 +56,7 @@ Logging: user-facing **events** (ring in RAM, cycle summaries and config saves a
 |---|---|---|---|
 | `control` | `poll_s` (60 s), or at once when an action is queued | read AC → `controller.step` → write if commanded → read back after a settle delay → update snapshot, history, events, persist on transitions | run longer than ~5 s per tick (all calls have timeouts) |
 | `net` | 5 s | check link, reconnect with backoff, reset if offline too long | call anything that resolves names (DNS blocks the loop) |
-| `http` | on request | Microdot; read snapshot, queue actions, save config through `store` | call the AC, hold big strings (stream large responses) |
+| `http` | on request | Microdot; read snapshot, queue actions, save config through `store`; `gc.collect()` after each reply, so request and reply buffers don't leave holes that split the heap | call the AC, hold big strings (stream large responses) |
 | `watchdog` | 1 s | feed the hardware WDT **only if** `control` beat within `2 × poll_s` and `net` beat within 30 s | feed unconditionally |
 | `housekeeping` | 60 s | `gc.collect()`, heap stats (free, largest block, minimums), `low_memory` event, an hourly `heap` line in `events.log` (not the RAM ring), prune the event ring | allocate |
 
@@ -95,7 +95,7 @@ didn't set → `MANUAL`; while a write is pending, the unchanged previous state 
 |---|---|---|
 | `profiles.json`, `settings.json` (+ `.bak`) | user saves | ~0 |
 | `state.json` (cycle owner, expected AC state, pause, rules inside their interval) | state transitions, an interval running out | ≤ 50 |
-| `events.log` (rotating, 2 × 64 KB; boot counter, uptime and the reading, no timestamps) | cycle start and end, phase, would, hard cap, profile, pause, resume, override, takeover, unreachable, failed or blocked write, config save, reboot; an hourly `heap` line | ≤ 150 |
+| `events.log` (rotating, 2 × 64 KB; boot counter, uptime and the reading, no timestamps) | cycle start and end, phase, would, hard cap, profile, pause, resume, override, takeover, unreachable, failed or blocked write, config save, reboot, low memory; an hourly `heap` line | ≤ 150 |
 | `crash.txt` (the last traceback) | after an uncaught exception | ~0 |
 | `boot.json`, `resets.json` (+ `.bak`) | once per boot: boot counter, resets by cause | a few |
 | `reset_reason.txt` | just before a deliberate reset; read and removed at the next boot | ~0 |
