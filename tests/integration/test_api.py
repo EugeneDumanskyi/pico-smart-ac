@@ -106,7 +106,7 @@ class TestRoutes(unittest.TestCase):
         root = _tmpdir()
         try:
             for name, data in (("index.html", b"<p>plain</p>"), ("index.html.gz", b"\x1f\x8bpacked"),
-                               ("editor.js", b"// plain")):
+                               ("editor.js", b"// plain"), ("apple-touch-icon.png", b"\x89PNG")):
                 with open(root + "/" + name, "wb") as f:
                     f.write(data)
 
@@ -117,17 +117,19 @@ class TestRoutes(unittest.TestCase):
                 return lambda port: simhttp.raw(port, (head + "\r\n").encode(), head=True)
 
             replies = exchange(page("/", "gzip, deflate, br"), page("/"), page("/", "br"), page("/editor.js", "gzip"),
-                               www=root)
+                               page("/apple-touch-icon.png", "gzip"), www=root)
         finally:
             for name in os.listdir(root):
                 os.remove(root + "/" + name)
             os.rmdir(root)
         self.assertEqual([r[:2] for r in replies], [(200, b"\x1f\x8bpacked"), (200, b"<p>plain</p>"),
-                                                    (200, b"<p>plain</p>"), (200, b"// plain")])
+                                                    (200, b"<p>plain</p>"), (200, b"// plain"),
+                                                    (200, b"\x89PNG")])
         heads = [r[2].lower() for r in replies]
         self.assertIn("content-encoding: gzip", heads[0])
         self.assertIn("content-type: text/html", heads[0])
         self.assertFalse("content-encoding" in heads[1] or "content-encoding" in heads[3])
+        self.assertIn("content-type: image/png", heads[4])  # no .gz copy: the PNG goes out as it is
         self.assertIn("vary: accept-encoding", heads[1])
 
     def test_unknown_path_and_method(self):
