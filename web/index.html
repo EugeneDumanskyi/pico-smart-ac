@@ -309,6 +309,9 @@ async function send(path, body) {
 async function setProfile(name) {
   const sel = $("profile");
   sel.dataset.busy = "1";
+  // Close the native picker first (mobile Safari keeps it open over a modal shown from its change event).
+  sel.blur();
+  await new Promise((r) => setTimeout(r, 50));
   const cycle = name === last.profile ? null : await choose("A phase is running. Switch to " + name + " and…");
   if (cycle) await send("/api/active", { profile: name, cycle });
   delete sel.dataset.busy;
