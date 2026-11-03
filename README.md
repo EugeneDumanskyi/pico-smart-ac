@@ -4,15 +4,17 @@ A Raspberry Pi Pico 2 W that runs a Daikin room AC in short, purposeful cycles i
 It cools when the room is hot, dries when it is humid, always dries the coil afterwards, then switches the AC off.
 The remote always wins: when someone uses it, the Pico steps back.
 
-**Status: on the way to v1.0 (M7).** Everything below is built and tested against the simulator; the long run on the
-real AC comes before the release. Until then the Pico runs in shadow mode: the real controller on real readings,
-logging what it *would* do, never writing to the AC. See the [roadmap](docs/roadmap.md).
+**Status: release candidate for v1.0 (M7).** Everything below is built, tested against the simulator and running on a
+real AC; the 14-day soak comes before the tag. See the [roadmap](docs/roadmap.md).
 
 ## How it works
 
-- Profiles (`day`, `night`, `away`, `off`) hold simple rules: "humidity above 75% → dry for up to 60 min, then fan 20 min".
+- Profiles hold simple rules: "humidity above 75% → cool for up to 40 min, then fan 20 min". `day` and `night` are
+  schedules of time-of-day stages, each running its own rules; `away` and `turbo` (a quick cool-down on demand) are
+  plain rule sets, and `off` starts nothing.
 - The Pico reads the AC once a minute over the Wi-Fi adapter's local HTTP API. No cloud, no account.
-- Every duration is relative; the Pico needs no clock or internet connection.
+- Every duration is relative. The wall clock only picks a schedule's stage; it comes from the AC's own status, with
+  the phone's clock as a backup, so the Pico needs no internet connection.
 - A web page served by the Pico, made for a phone, with four tabs:
   - **Status**: the room, the AC, what the Pico is doing; switch profile, pause, run a rule now, stop.
   - **History**: temperature, humidity and the AC's mode over 3, 12 or 24 h, and the events with the reading each

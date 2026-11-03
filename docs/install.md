@@ -79,9 +79,6 @@ If mpremote doesn't find the board, name the port: `python3 tools/deploy.py --po
    the room did, the event list what the Pico would have done and on which reading.
 4. Adjust the profiles on the Profiles tab if needed, then turn `dry_run` off.
 
-Until the v1.0 release the Pico runs in shadow mode (the `shadow` badge): it never writes to the AC, whatever
-`dry_run` says ([roadmap](roadmap.md)).
-
 The remote always wins: when someone changes the AC by hand, the Pico steps back (`manual` on the Status tab) and takes
 over again later, as set in the Settings tab.
 
