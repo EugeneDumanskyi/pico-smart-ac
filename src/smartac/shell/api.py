@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# HTTP routes (idea.md, "HTTP API"): GET /, /editor.js, /history.js, /api/state, /api/history, /api/events,
+# HTTP routes (idea.md, "HTTP API"): GET /, /editor.js, /history.js,
+# /apple-touch-icon.png, /api/state, /api/history, /api/events,
 # /api/log[?tail=N], GET/PUT /api/profiles and /api/settings, POST /api/profiles/validate and /reset, POST /api/active,
 # /api/action, /api/clock and /api/ac/test. GETs are open on the LAN; a POST or PUT needs X-Token equal to API_TOKEN
 # from secrets.py, and with no token configured every one is refused. Unknown paths -> 404, other methods -> 405.
@@ -204,6 +205,10 @@ def make(app, www="/www", timeout_ms=REQUEST_TIMEOUT_MS, token=None):
     @web.get("/history.js")
     async def history_js(req):
         return _asset(req, www + "/history.js")
+
+    @web.get("/apple-touch-icon.png")  # iOS asks for this path itself; the page links it too
+    async def icon(req):
+        return _asset(req, www + "/apple-touch-icon.png")
 
     @web.get("/api/state")
     async def state(req):

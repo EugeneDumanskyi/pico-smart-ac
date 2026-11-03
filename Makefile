@@ -10,7 +10,7 @@ M4_DIR ?= local/m4/$(shell date -u +%Y%m%d-%H%M%SZ)
 MINUTE_S ?= 15
 export MPY_DIR
 
-.PHONY: micropython lint test month dev supervised web build deploy
+.PHONY: micropython lint test month dev supervised web icon build deploy
 
 micropython:
 	tools/build_micropython.sh
@@ -37,6 +37,11 @@ web:
 # M4: DAIKIN_IP=<ac-ip> make supervised; SIM=1 for the simulator, M4_DIR=local/m4/<stamp> to restart a session.
 supervised:
 	$(MICROPYTHON) sim/supervised.py $(M4_DIR) --minute-s $(MINUTE_S) $(if $(SIM),--sim)
+
+# web/apple-touch-icon.png from web/icon.svg (macOS Quick Look renders it; ImageMagick shrinks it to 64 colours).
+icon:
+	mkdir -p build && qlmanage -t -s 540 -o build web/icon.svg >/dev/null
+	magick build/icon.svg.png -resize 180x180 -alpha off +dither -colors 64 -strip PNG8:web/apple-touch-icon.png
 
 build:
 	python3 tools/deploy.py --build
