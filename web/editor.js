@@ -504,21 +504,24 @@
       h("div", { class: "tools" }, "rule:", moves(ed, rules, i, listPath, 1, "Remove rule " + r.name + "?")));
   }
 
-  function askName(ed, question, initial) {
+  function askName(ed, question, initial, current) {
     const answer = prompt(question, initial || "");
     if (answer == null) return null;
-    const name = answer.trim();
-    if (!NAME_RE.test(name)) { alert("A name has 1–24 characters: a–z, 0–9 and _"); return null; }
+    // A phone's keyboard capitalises the first letter of a prompt, so case is never the reason to refuse a name.
+    const name = answer.trim().toLowerCase();
+    if (!NAME_RE.test(name)) { alert("A name has 1–24 characters: lowercase a–z, 0–9 and _"); return null; }
+    if (name === current) return name;
     if (name === "off" || name in ed.draft.profiles) { alert('"' + name + '" is taken'); return null; }
     return name;
   }
 
   function renameProfile(ed, old) {
-    const name = askName(ed, "New name for " + old, old);
-    if (!name) return;
+    const name = askName(ed, "New name for " + old, old, old);
+    if (!name || name === old) return;
     ed.edit(() => {
       const out = {};
       for (const [k, v] of Object.entries(ed.draft.profiles)) out[k === old ? name : k] = v;
+      if (out[name].label === old) out[name].label = name;
       for (const p of Object.values(out)) for (const st of p.stages || []) if (st.profile === old) st.profile = name;
       ed.draft.profiles = out;
       ed.rekey("profiles." + old, "profiles." + name);
