@@ -194,7 +194,7 @@ hold.
 `min_interval_min`. **Stop** ends a running cycle the way "finish" does (fan phase, then off); **Stop now** writes off
 at once.
 
-**PAUSED** is set from the web page (1 h, 2 h, 8 h, or until resumed). Pausing, or switching to any other profile,
+**PAUSED** is set from the web page (.5 h, 1 h, 2 h, 8 h, or until resumed). Pausing, or switching to any other profile,
 while a phase runs (`RUNNING`, `TAKEOVER`) asks what to do with the AC (in `STOPPING` it is going off anyway, so the
 page doesn't ask):
 - **finish**: fan phase, then off (the default button);
@@ -356,7 +356,7 @@ The Pico sends ages and durations in seconds; the page turns them into clock tim
   `COOLDOWN` (minutes left) / `MANUAL` (hands off, minutes left) / `TAKEOVER` / `PAUSED` (minutes left).
 - Buttons:
   - **Profile switcher** (dropdown: off, each profile).
-  - **Pause 1 h / 2 h / 8 h / until resumed**, **Resume**. While a phase runs, pause and a profile switch ask:
+  - **Pause .5 h / 1 h / 2 h / 8 h / until resumed**, **Resume**. While a phase runs, pause and a profile switch ask:
     *finish* (default) or *leave running*.
   - **Run now**: pick a profile and a rule (with its plain-language summary) and start it immediately, skipping the
     trigger. Only profiles with rules are offered; under a schedule it starts on the current stage's profile.
