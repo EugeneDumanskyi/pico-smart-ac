@@ -102,6 +102,16 @@ M7 device checks, 2026-10-29, same board and firmware, live build (writes on), D
 | Heap after profile edits, after the fix | `gc.collect()` after each request, `json.dump` streamed to the file, `json.loads` on the body's bytes. 8 profile saves in 13 min: largest block 132 544–132 752 bytes, free 266 576 at the lowest, 0 `low_memory`. |
 | Heap while serving the History tab | 75 rounds of `/api/history` (43 KB, 0.55 s) and `/api/log?tail=300` (32 KB, 0.50 s) from the Mac, back to back, with `/api/state` in between: all 200, free heap 265 872–266 560, largest block 80–82 KB, 0 `low_memory`. The largest block had fallen from 132 KB to 82 KB over the first 2.4 h of the boot before the test, not during it; to watch in the soak. |
 
+M7 soak, 2026-10-29 to 2026-11-05, same board and firmware, live build. Ended early by the owner's decision (planned 14
+days). The build predates the web UI changes merged on 2026-11-03. Events cover the last 4.5 days; counters cover the whole run.
+
+| Check | Result |
+|---|---|
+| Uptime | PASS: 166 h (6.9 days, 7 nights) on one boot, no reset or crash, 0 Wi-Fi drops. |
+| AC control | 419 writes, 0 write errors, 0 `blocked`, 0 misses. 10 427 reads, 19 read errors. 91 cycles ended normally, 25–72 min each, none stuck. |
+| Heap | Free 289 360–291 808 bytes in the hourly `heap` lines over 4.5 days (290 832 → 289 440, about 0.3 KB a day); largest block 46 960–59 376 bytes, no trend; 0 `low_memory`. |
+| Overrides | Not tested: no `manual` or `takeover` event in the 4.5 days of events, or in the earlier pulls of the live builds. 3 pauses. |
+
 ## Flashing
 
 1. Download the UF2 above and check it: `shasum -a 256 RPI_PICO2_W-20260824-v1.29.0.uf2`.
