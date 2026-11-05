@@ -231,7 +231,7 @@ a 16 KB PUT (16 020 bytes) saved with no `low_memory` event. Merged to `main`.
 | Scope | History tab (SVG chart, no library), events on flash, README with setup, install guide, `firmware.md` complete. |
 | Out of scope | Everything in later releases. |
 | Deliverables | Tag `v1.0.0`; release notes. |
-| Done when | 14 days of continuous uptime (`dry_run` or `off` allowed while nobody is home), including ≥ 7 nights with automation on: no stuck on/off, no override missed or fought, heap flat, all resets explained; fresh install from the README works. |
+| Done when | About 7 days of continuous uptime (shortened from 14 on 2026-11-05; `dry_run` or `off` allowed while nobody is home), including ≥ 7 nights with automation on: no stuck on/off, no override missed or fought, heap flat, all resets explained; fresh install from the README works. |
 | Dependencies | M6. |
 | Risks | Rare Wi-Fi faults show up only in the long soak. |
 | Needs | Pico; real AC. |
@@ -252,7 +252,10 @@ the three windows, real fake-AC cycles in the lines, band and markers, the curso
 
 Done on the board (2026-10-29): deployed; heap while `/api/history` and `/api/log?tail=300` are served, and after
 profile edits (a fragmentation fix), in `firmware.md`'s device rows. Left: the `wifi up` line and `deploy.py`'s wait
-on the board, the History tab checked on the phone. Then the 14-day soak, a fresh install from the README, and the tag.
+on the board, the History tab checked on the phone. Then a fresh install from the README and the tag.
+
+Soak ended early on 2026-11-05 by the owner's decision, after 6.9 days and 7 nights on one boot: result in
+[firmware.md](firmware.md#tested-on-the-device). The build tested predates the web UI changes merged on 2026-11-03.
 
 ## After v1.0
 

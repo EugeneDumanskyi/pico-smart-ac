@@ -5,7 +5,7 @@ It cools when the room is hot, dries when it is humid, always dries the coil aft
 The remote always wins: when someone uses it, the Pico steps back.
 
 **Status: release candidate for v1.0 (M7).** Everything below is built, tested against the simulator and running on a
-real AC; the 14-day soak comes before the tag. See the [roadmap](docs/roadmap.md).
+real AC, including a 7-day soak; a fresh install check comes before the tag. See the [roadmap](docs/roadmap.md).
 
 ## How it works
 
