@@ -39,6 +39,7 @@ OBSERVE = "OBSERVE"  # the app reads only and runs no controller (shell/app.py, 
 ACT_PAUSE = "pause"
 ACT_RESUME = "resume"
 ACT_RUN = "run"
+ACT_EXTEND = "extend"  # add minutes to the running cool or dry phase
 ACT_STOP = "stop"
 ACT_STOP_NOW = "stop_now"
 ACT_CLEAR_MANUAL = "clear_manual"

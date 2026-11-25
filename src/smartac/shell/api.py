@@ -19,9 +19,10 @@ import sys
 from microdot import Microdot, Request, Response
 
 from smartac.core.config import OFF, is_ipv4
-from smartac.core.controller import FINISH, LEAVE, MAX_PAUSE_MIN
+from smartac.core.controller import FINISH, LEAVE, MAX_EXTEND_MIN, MAX_PAUSE_MIN
 from smartac.core.types import (
     ACT_CLEAR_MANUAL,
+    ACT_EXTEND,
     ACT_PAUSE,
     ACT_RESUME,
     ACT_RUN,
@@ -31,7 +32,8 @@ from smartac.core.types import (
 )
 
 REQUEST_TIMEOUT_MS = 10000
-ACTIONS = (ACT_PAUSE, ACT_RESUME, ACT_RUN, ACT_STOP, ACT_STOP_NOW, ACT_CLEAR_MANUAL)  # set_profile: /api/active
+# set_profile: /api/active
+ACTIONS = (ACT_PAUSE, ACT_RESUME, ACT_RUN, ACT_EXTEND, ACT_STOP, ACT_STOP_NOW, ACT_CLEAR_MANUAL)
 MAX_DOC_BODY = 17 * 1024  # config.MAX_DOC_BYTES plus room for the page's whitespace
 DRAIN_CHUNK = 512
 MAX_TAIL = 500  # /api/log?tail=
@@ -118,6 +120,10 @@ def _check_action(body, profiles):
         i = body.get("rule")
         if not _int(i) or not 0 <= i < len(profile.get("rules", [])):
             return "rule must be an index in the profile"
+    elif name == ACT_EXTEND:
+        minutes = body.get("minutes")
+        if not _int(minutes) or not 1 <= minutes <= MAX_EXTEND_MIN:
+            return "minutes must be 1-%d" % MAX_EXTEND_MIN
     elif name not in ACTIONS:
         return "unknown action"
     return None
@@ -252,8 +258,8 @@ def make(app, www="/www", timeout_ms=REQUEST_TIMEOUT_MS, token=None):
     @web.post("/api/action")
     async def action(req):
         # {"action": "pause", "minutes": 60 | null, "cycle": "finish" | "leave"}, {"action": "run", "profile": "day",
-        # "rule": 0}, or resume, stop, stop_now, clear_manual -> 202 and the state; the next tick applies it, and one
-        # that doesn't apply in that state becomes an `ignored` event.
+        # "rule": 0}, {"action": "extend", "minutes": 10}, or resume, stop, stop_now, clear_manual -> 202 and the
+        # state; the next tick applies it, and one that doesn't apply in that state becomes an `ignored` event.
         body, err = json_object(req)
         if err is not None:
             return err

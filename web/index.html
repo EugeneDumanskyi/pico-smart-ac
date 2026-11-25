@@ -136,7 +136,7 @@
         <select id="run-rule" aria-label="rule to run"></select><button id="run">Run</button></div>
       <p id="run-sum"></p>
       <div class="row"><b>stop</b><button id="stop">Stop</button><button id="stop-now" class="danger">Stop now</button>
-        <button id="clear">Clear manual hold</button></div>
+        <button id="extend">+10 min</button></div>
       <span id="sent" aria-live="polite"></span>
     </div>
     <table id="rows"></table>
@@ -373,13 +373,16 @@ function renderActions(s) {
   if (live) renderRun(s);
   for (const b of $("pause").querySelectorAll("button[data-min]")) b.disabled = !live || st === "PAUSED";
   on("resume", ready && (st === "PAUSED" || s.pause_pending));
-  const runnable = ready && (st === "IDLE" || st === "COOLDOWN") && ac.reachable && !ac.power;
+  // Run also replaces our own cycle once it only winds down: its fan phase, or switching off.
+  const c = s.cycle, winding = st === "STOPPING" || (CYCLING.includes(st) && c && c.mode === "fan");
+  const runnable = ready && ac.reachable && !s.pause_pending &&
+    (((st === "IDLE" || st === "COOLDOWN") && !ac.power) || winding);
   on("run", runnable && $("run-rule").options.length > 0);
   on("run-profile", ready);
   on("run-rule", ready);
   on("stop", ready && ["RUNNING", "MANUAL", "TAKEOVER"].includes(st));
   on("stop-now", ready && (CYCLING.includes(st) || (st === "MANUAL" && ac.power === true)));
-  on("clear", ready && st === "MANUAL");
+  on("extend", ready && st === "RUNNING" && c && (c.mode === "cool" || c.mode === "dry"));
 }
 
 function acText(s) {
@@ -499,10 +502,10 @@ $("run-profile").addEventListener("change", (ev) => { ev.target.dataset.picked =
 $("run-rule").addEventListener("change", showSummary);
 $("run").addEventListener("click", () => act("run", { profile: $("run-profile").value, rule: +$("run-rule").value }));
 $("stop").addEventListener("click", () => act("stop"));
+$("extend").addEventListener("click", () => act("extend", { minutes: 10 }));
 $("stop-now").addEventListener("click", () => {
   if (confirm("Switch the AC off now, without the fan phase?")) act("stop_now");
 });
-$("clear").addEventListener("click", () => act("clear_manual"));
 window.addEventListener("hashchange", showTab);
 </script>
 <script src="/editor.js"></script>

@@ -93,13 +93,15 @@ def _outdoor(rng, hour):
 
 
 def _action(rng, at, out):
-    kind = rng.choice(("pause", "pause", "pause_untimed", "run", "stop", "stop_now", "clear_manual"))
+    kind = rng.choice(("pause", "pause", "pause_untimed", "run", "extend", "stop", "stop_now", "clear_manual"))
     cycle = rng.choice(("finish", "leave"))
     if kind == "pause":
         out.append((at, "action", {"action": "pause", "minutes": rng.between(10, 240), "cycle": cycle}))
     elif kind == "pause_untimed":
         out.append((at, "action", {"action": "pause", "minutes": None, "cycle": cycle}))
         out.append((at + rng.between(30, 360) * 60, "action", {"action": "resume"}))
+    elif kind == "extend":
+        out.append((at, "action", {"action": "extend", "minutes": 10}))
     elif kind == "run":
         profile = rng.choice(tuple(PROFILE_RULES))
         out.append((at, "action", {"action": "run", "profile": profile, "rule": rng.below(PROFILE_RULES[profile])}))

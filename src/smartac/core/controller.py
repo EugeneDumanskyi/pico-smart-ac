@@ -13,6 +13,7 @@ from smartac.core.config import OFF, stage_at
 from smartac.core.rules import RuleSelector, goal_hit
 from smartac.core.types import (
     ACT_CLEAR_MANUAL,
+    ACT_EXTEND,
     ACT_PAUSE,
     ACT_RESUME,
     ACT_RUN,
@@ -56,6 +57,8 @@ SNAPSHOT_VERSION = 2  # 2 added "intervals"; a v1 snapshot is read as having non
 MIN_MS = 60 * 1000
 UNREACHABLE_MISSES = 3  # consecutive failed poll reads before EV_UNREACHABLE
 MAX_PAUSE_MIN = 480  # longest timed pause; "until resumed" has no timer
+MAX_EXTEND_MIN = 60  # most minutes one extend adds
+MAX_CAP_MIN = 480  # an extended cycle's hard cap stays within the hard_cap_min setting's range
 FINISH = "finish"
 LEAVE = "leave"
 KIND_RULE = "rule"
@@ -603,6 +606,8 @@ class Controller:
             ok = self._resume(out)
         elif name == ACT_RUN:
             ok = self._run(now, action, reading.ac, out)
+        elif name == ACT_EXTEND:
+            ok = self._extend(action, out)
         elif name == ACT_STOP:
             ok = self._stop(out)
         elif name == ACT_STOP_NOW:
@@ -647,8 +652,16 @@ class Controller:
         return True
 
     def _run(self, now, action, ac, out):
-        # Run now: start a rule at once, skipping its trigger and min_interval.
-        if self.state not in (IDLE, COOLDOWN) or ac is None or ac.power:
+        # Run now: start a rule at once, skipping its trigger and min_interval. From IDLE or COOLDOWN with the AC
+        # off, or in place of our own cycle once it only winds down (a fan phase, or switching off): that cycle
+        # ends without a cooldown and the new one starts from the AC as it is. Not while a write is unconfirmed,
+        # or a pending pause would be lost.
+        if ac is None:
+            return False
+        if self.state in (IDLE, COOLDOWN):
+            if ac.power:
+                return False
+        elif not self._winding_down() or self.written is not None or self.pause is not None:
             return False
         name = action.get("profile")
         profile = self.profiles.get("profiles", {}).get(name) if isinstance(name, str) else None
@@ -656,9 +669,40 @@ class Controller:
         i = action.get("rule")
         if not isinstance(rules, list) or not _is_int(i) or not 0 <= i < len(rules):
             return False
+        if self.state in OWNED:
+            old = self.cycle["rule"]["name"] or self.cycle["kind"]
+            self._event(out, EV_CYCLE_END, "%s ended (run %s)" % (old, rules[i]["name"]))
+            self._release()
         if name == self._rules_name():
             self.selector.started(rules[i], now)
         self._start(now, rules[i], ac, out)
+        return True
+
+    def _winding_down(self):
+        # Our cycle has nothing left but drying the coil or switching off.
+        if self.state == STOPPING:
+            return True
+        if self.state not in CYCLING:
+            return False
+        c = self.cycle
+        return c["rule"]["phases"][c["phase"]]["mode"] == MODE_FAN
+
+    def _extend(self, action, out):
+        # Extend: more minutes for the cool or dry phase that runs now; the cycle's hard cap grows by the same.
+        minutes = action.get("minutes")
+        if not _is_int(minutes) or not 1 <= minutes <= MAX_EXTEND_MIN or self.state != RUNNING:
+            return False
+        c = self.cycle
+        i = c["phase"]
+        phase = c["rule"]["phases"][i]
+        if phase["mode"] not in WET or c["hard_cap_min"] + minutes > MAX_CAP_MIN:
+            return False
+        phases = list(c["rule"]["phases"])
+        phases[i] = dict(phase, max_min=phase["max_min"] + minutes)
+        self._set_phases(phases)
+        c["hard_cap_min"] += minutes
+        msg = "phase %d/%d extended by %d min (%d min)" % (i + 1, len(phases), minutes, phases[i]["max_min"])
+        self._event(out, EV_PHASE, msg)
         return True
 
     def _stop(self, out):
