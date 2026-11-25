@@ -112,6 +112,18 @@ days). The build predates the web UI changes merged on 2026-11-03. Events cover 
 | Heap | Free 289 360–291 808 bytes in the hourly `heap` lines over 4.5 days (290 832 → 289 440, about 0.3 KB a day); largest block 46 960–59 376 bytes, no trend; 0 `low_memory`. |
 | Overrides | Not tested: no `manual` or `takeover` event in the 4.5 days of events, or in the earlier pulls of the live builds. 3 pauses. |
 
+Long run, 2026-11-05 to 2026-11-25, same board and firmware, live build deployed on 2026-11-05 after the M7 soak,
+powered from a USB wall charger. Ended by moving the board to another USB power source. The event log covers
+the last 3.1 days (days 17–20).
+
+| Check | Result |
+|---|---|
+| Uptime | PASS: 487.6 h (20.3 days) on one boot, no reset or crash, 0 Wi-Fi drops, 0 log write errors. |
+| Heap | Free 282 336–283 152 bytes in the 76 hourly `heap` lines of days 17–20, no trend; largest block 46 528–54 704 bytes; 0 `low_memory`. |
+| AC control | 91 cycles ended normally in the 3.1 days of events. 3 pauses, each resumed. |
+| AC outage | Once: the AC was unreachable for 3 reads, the fan-phase write failed twice (`write_failed`), and the Pico handed over to a manual hold. Normal control resumed after the hold. |
+| Clock | The Pico's clock stayed within ±5 s of the AC's clock. Twice the AC clock reading jumped by about +55 s and back 10 min later (on the AC side); no effect on control. |
+
 ## Flashing
 
 1. Download the UF2 above and check it: `shasum -a 256 RPI_PICO2_W-20260824-v1.29.0.uf2`.
