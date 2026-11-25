@@ -257,6 +257,10 @@ on the board, the History tab checked on the phone. Then a fresh install from th
 Soak ended early on 2026-11-05 by the owner's decision, after 6.9 days and 7 nights on one boot: result in
 [firmware.md](firmware.md#tested-on-the-device). The build tested predates the web UI changes merged on 2026-11-03.
 
+Added to v1.0 on 2026-11-25, from daily use: **Run now** also during our own fan phase (it replaces the winding-down
+cycle), and **+10 min** to extend the running cool or dry phase (Turbo, Night Turbo). Host tests and the 30-day
+simulation pass; a short check on the real AC before the tag.
+
 ## After v1.0
 
 | Release | Goal | Scope | Needs |

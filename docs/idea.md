@@ -138,7 +138,8 @@ stateDiagram-v2
     state Automation {
         IDLE --> RUNNING : trigger matches / run
         COOLDOWN --> RUNNING : run
-        RUNNING --> RUNNING : next phase
+        RUNNING --> RUNNING : next phase / extend / run (in the fan phase)
+        STOPPING --> RUNNING : run
         RUNNING --> STOPPING : last phase done / hard cap / stop now
         STOPPING --> COOLDOWN : off confirmed
         STOPPING --> IDLE : off confirmed, no cooldown
@@ -186,7 +187,7 @@ If the AC is on and we didn't turn it on (for example, it was on when the Pico b
 **TAKEOVER.** If the hold is over and the AC is still on, the Pico ends the run the way a cycle ends:
 fan for `finish_fan_min` if the mode was cool or dry, then off, then `IDLE` (no cooldown). Not in the `off` profile and
 not while PAUSED. A run in fan mode is left alone when the hold ends: fan uses little power and dries the coil, so it
-runs until someone switches it off or changes the mode (a new change restarts the hold). The hold also ends early on **Clear manual** or **Stop** (takeover with the fan phase) and on
+runs until someone switches it off or changes the mode (a new change restarts the hold). The hold also ends early on **Stop** (takeover with the fan phase) and on
 **Stop now** (takeover straight to off). A change by the human during the takeover goes back to `MANUAL` with a new
 hold.
 
@@ -360,11 +361,15 @@ The Pico sends ages and durations in seconds; the page turns them into clock tim
     *finish* (default) or *leave running*.
   - **Run now**: pick a profile and a rule (with its plain-language summary) and start it immediately, skipping the
     trigger. Only profiles with rules are offered; under a schedule it starts on the current stage's profile.
+    It also replaces our own cycle once that only winds down (its fan phase, or switching off): the old cycle ends
+    with no cooldown and the new one starts from the AC as it is.
+  - **+10 min**: extend the cool or dry phase that runs now (e.g. Turbo near its end, the room still hot). The
+    cycle's hard cap grows by the same (at most 480 min in all); a phase goal still ends it early.
   - **Stop**: finish with a fan phase, then off. **Stop now**: off immediately (with a confirm).
-  - **Clear manual hold**.
   - Each button is enabled only in the states the controller accepts it in (Pause: not `PAUSED`; Resume: `PAUSED` or a
-    pause waiting for the cycle to end; Run: `IDLE` or `COOLDOWN` with the AC reachable and off; Stop: `RUNNING`,
-    `MANUAL`, `TAKEOVER`; Stop now: `RUNNING`, `TAKEOVER`, `MANUAL` with the AC on; Clear: `MANUAL`). All are disabled
+    pause waiting for the cycle to end; Run: `IDLE` or `COOLDOWN` with the AC reachable and off, or our fan phase or `STOPPING`, not with a pause
+    waiting; +10 min: `RUNNING` in a cool or dry phase; Stop: `RUNNING`,
+    `MANUAL`, `TAKEOVER`; Stop now: `RUNNING`, `TAKEOVER`, `MANUAL` with the AC on). All are disabled
     in observe mode, and all but Pause until the first AC read after a boot. An action that still doesn't apply (the
     state changed meanwhile) shows its `ignored` event next to the buttons.
 - Errors: unreachable time, the last failed write, a config warning, the phone's clock more than 5 min from the
@@ -424,7 +429,7 @@ Large responses (`/api/history`, the UI files) are streamed in chunks. Times are
 | `GET /api/settings` | | `settings.json` (in shadow mode the saved `dry_run`, not the forced one) |
 | `PUT /api/settings` | whole document | as PUT profiles |
 | `POST /api/active` | `{"profile": "away", "cycle": "finish"}` (`cycle`: `finish` or `leave`, used only if a cycle runs; default `finish`) | 202 and the state; the next tick applies it. 401 without the right token (always, if `API_TOKEN` is unset), 400 for an unknown profile or `cycle`, 503 if the action queue is full |
-| `POST /api/action` | `{"action": "pause", "minutes": 120, "cycle": "finish"}` (`minutes` 1–480, or null = until resumed; `cycle` as above), `{"action": "resume"}`, `{"action": "run", "profile": "day", "rule": 0}` (`rule`: index in the profile), `{"action": "stop"}`, `{"action": "stop_now"}`, `{"action": "clear_manual"}` | 202 and the state; the next tick applies it, and one that doesn't apply in that state becomes an `ignored` event. 401 as above, 400 for an unknown action or a bad field, 409 in observe mode, 503 if the action queue is full |
+| `POST /api/action` | `{"action": "pause", "minutes": 120, "cycle": "finish"}` (`minutes` 1–480, or null = until resumed; `cycle` as above), `{"action": "resume"}`, `{"action": "run", "profile": "day", "rule": 0}` (`rule`: index in the profile), `{"action": "extend", "minutes": 10}` (1–60), `{"action": "stop"}`, `{"action": "stop_now"}`, `{"action": "clear_manual"}` (the same as stop in `MANUAL`; no button) | 202 and the state; the next tick applies it, and one that doesn't apply in that state becomes an `ignored` event. 401 as above, 400 for an unknown action or a bad field, 409 in observe mode, 503 if the action queue is full |
 | `POST /api/clock` | `{"time": "2026-10-28T14:05:09Z"}` (the phone's local time; the `Z` is only part of the format, as in the AC's `last_ope.time`) | 200 `{"time": "14:05", "source": "phone", "phone_s": 0}`. Sets the clock only until the AC has (ADR 0006); otherwise compared only. `phone_s`: the phone's clock minus the Pico's, null while the time is unknown. A difference under 60 s changes nothing. 401 as above, 400 for a time that doesn't parse or is before 2024 |
 | `POST /api/ac/test` | `{"ip": "192.0.2.10"}` (optional; default the address in use) | 200 `{"reachable": true, "ip": "192.0.2.10", "fw": "3.6.0", "type": "RA", "comm_err": 0, "ms": 140}` or `{"reachable": false, "ip": ..., "error": "timeout"}`; read-only on the AC. 401 as above, 400 for an address that isn't IPv4, 503 while another test runs |
 

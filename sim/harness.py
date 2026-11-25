@@ -33,6 +33,7 @@ from smartac.core.types import (  # noqa: E402
     ACT_CLEAR_MANUAL,
     ACT_PAUSE,
     ACT_RESUME,
+    ACT_RUN,
     ACT_SET_PROFILE,
     ACT_STOP,
     ACT_STOP_NOW,
@@ -293,8 +294,9 @@ class Monitor:
                 self.fail("left %s without a hand-off" % before)
             self.open = False
             self.start_ac = self.confirmed = self.pending = None
-        # 8: a cycle ends with the AC off.
-        if EV_CYCLE_END in kinds and dev.ac().power:
+        # 8: a cycle ends with the AC off, unless Run replaced it in the same step (the new cycle owns the AC).
+        replaced = ACT_RUN in names and EV_CYCLE_START in kinds
+        if EV_CYCLE_END in kinds and dev.ac().power and not replaced:
             self.fail("cycle_end with the AC on: %r" % (dev.ac(),))
 
         booting = ctl.booting
